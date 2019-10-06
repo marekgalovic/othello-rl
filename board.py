@@ -1,0 +1,139 @@
+import copy
+import random
+from collections import namedtuple
+
+from bitarray import bitarray
+import numpy as np
+
+from utils import generate_directions
+
+
+class Position(namedtuple('Position', ('r_i', 'c_i', 'directions'))):
+    pass
+
+
+class Board:
+
+    def __init__(self, size=8):
+        assert isinstance(size, int) and (size % 2 == 0)
+
+        self._size = int(size)
+        self._board = bitarray([0] * (2 * (self._size ** 2)))
+
+        self._init_empty()
+
+    @property
+    def size(self):
+        return self._size
+
+    @property
+    def raw(self):
+        return self._board
+
+    def copy(self):
+        return copy.deepcopy(self)
+
+    def scores(self):
+        occupancy = np.asarray(list(self._board[::2]), dtype=np.int8)
+        player_positions = np.asarray(list(self._board[1::2]), dtype=np.int8)
+
+        return np.dot(occupancy, 1 - player_positions), np.dot(occupancy, player_positions)
+
+    def to_tensor(self, color):
+        t = np.empty(shape=(self._size, self._size, 3), dtype=np.uint8)
+        player_positions = np.asarray(list(self._board[1::2]), dtype=np.uint8).reshape((self._size, self._size))
+
+        # Occupancy
+        t[:,:,0] = np.asarray(list(self._board[::2]), dtype=np.uint8).reshape((self._size, self._size))
+        # My positions
+        t[:,:,1] = (player_positions == color) * t[:,:,0]
+        # Opponent positions
+        t[:,:,2] = (1 - t[:,:,1]) * t[:,:,0]
+
+        return t
+
+    def apply_position(self, color, position):
+        for direction in position.directions:
+            r_i = position.r_i
+            c_i = position.c_i
+            for _ in range(direction[2]):
+                idx = 2 * (r_i * self._size + c_i)
+                self._board[idx] = 1
+                self._board[idx+1] = color
+                r_i += direction[0]
+                c_i += direction[1]
+
+    def valid_positions(self, color):
+        valid_positions = {}
+        for r_i in range(self._size):
+            for c_i in range(self._size):
+                if self._board[2 * (r_i * self._size + c_i)]:
+                    continue
+
+                directions = []
+                for (r_direction, c_direction) in generate_directions(self._size, r_i, c_i):
+                    num_steps = self._traverse_direction(color, r_i, c_i, r_direction, c_direction)
+
+                    if num_steps > 0:
+                        directions.append((r_direction, c_direction, num_steps))
+
+                if len(directions) > 0:
+                    valid_positions[(r_i, c_i)] = Position(r_i, c_i, directions)
+
+        return valid_positions
+
+    def _get_position(self, r_i, c_i):
+        [occupied, color] = self._board[2*(r_i*self._size+c_i):2*(r_i*self._size+c_i)+2]
+        return bool(occupied), int(color)
+
+    def _set_position(self, r_i, c_i, occupied, color):
+        self._board[2*(r_i*self._size+c_i):2*(r_i*self._size+c_i)+2] = bitarray([occupied, color])
+
+    def _init_empty(self):
+        player_a = random.choice([0, 1])
+        idx = int(self._size / 2 - 1)
+
+        self._set_position(idx, idx, 1, player_a)
+        self._set_position(idx, idx+1, 1, 1-player_a)
+        self._set_position(idx+1, idx, 1, 1-player_a)
+        self._set_position(idx+1, idx+1, 1, player_a)
+
+    def _traverse_direction(self, color, r_i, c_i, r_direction, c_direction):
+        num_steps = 1
+        r_i += r_direction
+        c_i += c_direction
+        idx = 2 * (r_i * self._size + c_i)
+        [occupied, pos_color] = self._board[idx:idx+2]
+        while occupied and pos_color == (1 - color):
+            r_i += r_direction
+            c_i += c_direction
+            if r_i < 0 or r_i > self._size - 1:
+                return 0
+            if c_i < 0 or c_i > self._size - 1:
+                return 0
+
+            num_steps += 1 
+            idx = 2 * (r_i * self._size + c_i)
+            [occupied, pos_color] = self._board[idx:idx+2]
+
+        if occupied and pos_color == color and num_steps > 1:
+            return num_steps
+
+        return 0
+
+    def __str__(self):
+        rows, scores = [], [0, 0]
+        rows.append('\t' + '\t'.join(['%d' % i for i in range(self._size)]))
+        rows.append('\t' + '\t'.join('-' for _ in range(self._size)))
+        for r_i in range(self._size):
+            cols = []
+            for c_i in range(self._size):
+                occupied, color = self._get_position(r_i, c_i)
+                if occupied:
+                    scores[int(color)] += 1
+                    cols.append('%d' % int(color))
+                else:
+                    cols.append('.')
+            rows.append(('%d |\t' % r_i) + '\t'.join(cols))
+
+        return '\n'.join(rows) + '\nPlayer 0: %d, Player 1: %d' % tuple(scores)
