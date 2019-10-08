@@ -1,11 +1,17 @@
+import os
 from argparse import ArgumentParser
+from datetime import datetime
+import time
 import random
+from multiprocessing import cpu_count
 
+import ray
 import numpy as np
 import tensorflow as tf
 
 from board import Board
 from agent import Agent
+from utils import sample_checkpoint
 
 
 def get_state(board, color):
@@ -24,11 +30,13 @@ def get_state(board, color):
 def play_game(agent0, agent1):
     board = Board()
 
+    steps = 0
     agents = (agent0, agent1)
     # states = ([], [])
     curr_agent_idx = random.choice([0, 1])
     samples_buffer = []
     while True:
+        steps += 1
         agent = agents[curr_agent_idx]
         state, valid_positions, valid_positions_mask = get_state(board, curr_agent_idx)
 
@@ -55,13 +63,45 @@ def play_game(agent0, agent1):
     elif player1_score < player0_score:
         reward = 1
 
-    return samples_buffer, reward
+    return samples_buffer, reward, steps
 
 
-def collect_samples(agent0, agent1, n_games=1, gamma=0.99):
-    samples = []
+# def collect_samples(agent0, agent1, n_games=1, gamma=0.99):
+#     samples  = []
+#     total_steps, total_wins, total_losses = 0, 0, 0
+#     for _ in range(n_games):
+#         game_samples, reward, game_steps = play_game(agent0, agent1)
+#         total_steps += game_steps
+#         total_wins += max(0, reward)
+#         total_losses += -min(0, reward)
+
+#         # Append discounted reward
+#         for i in range(len(game_samples)):
+#             game_samples[i].append(reward * (gamma ** (len(game_samples) - i)))
+
+#         samples.extend(game_samples)
+
+#     return samples, {
+#         'avg_game_length': total_steps / float(n_games),
+#         'win_rate': total_wins / float(n_games),
+#         'loss_rate': total_losses / float(n_games),
+#     }
+
+
+@ray.remote
+def play_games(agent0_checkpoint, agent1_checkpoint, board_size, n_games, gamma):
+    agent0 = Agent(board_size)
+    tf.train.Checkpoint(net=agent0).restore(agent0_checkpoint).expect_partial()
+    agent1 = Agent(board_size)
+    tf.train.Checkpoint(net=agent1).restore(agent1_checkpoint).expect_partial()
+
+    samples  = []
+    total_steps, total_wins, total_losses = 0, 0, 0
     for _ in range(n_games):
-        game_samples, reward = play_game(agent0, agent1)
+        game_samples, reward, game_steps = play_game(agent0, agent1)
+        total_steps += game_steps
+        total_wins += max(0, reward)
+        total_losses += -min(0, reward)
 
         # Append discounted reward
         for i in range(len(game_samples)):
@@ -69,7 +109,36 @@ def collect_samples(agent0, agent1, n_games=1, gamma=0.99):
 
         samples.extend(game_samples)
 
-    return samples
+    return samples, total_steps, total_wins, total_losses
+
+
+def collect_samples(checkpoints, board_size, n_games=1, n_partitions=1, gamma=0.99):
+    partition_games = int(np.ceil(n_games / n_partitions))
+
+    futures = []
+    for _ in range(n_partitions):
+        futures.append(play_games.remote(checkpoints[-1], sample_checkpoint(checkpoints, p_latest=0.9), board_size, partition_games, gamma))
+
+    samples  = []
+    total_steps, total_wins, total_losses = 0, 0, 0
+    while futures:
+        done_ids, futures = ray.wait(futures)
+
+        for future_id in done_ids:
+            (game_samples, steps, wins, losses) = ray.get(future_id)
+
+            total_steps += steps
+            total_wins += wins
+            total_losses += losses
+            samples.extend(game_samples)
+
+    total_games = n_partitions * partition_games
+
+    return samples, {
+        'avg_game_length': total_steps / float(total_games),
+        'win_rate': total_wins / float(total_games),
+        'loss_rate': total_losses / float(total_games),
+    }
 
 
 def batches(samples, batch_size):
@@ -109,38 +178,67 @@ def train(agent, optimizer, states, old_action_p, action_indices, state_values, 
     grads = t.gradient(loss, agent.trainable_variables)
     optimizer.apply_gradients(zip(grads, agent.trainable_variables))
 
-    return loss.numpy()
+    return loss
 
 
 def main(args):
+    job_dir = os.path.join(args.job_dir, datetime.now().strftime('%Y%m%d%H%M%s'))
+    if not os.path.exists(job_dir):
+        os.makedirs(job_dir)
+    print('Job dir: %s' % job_dir)
+
     board = Board()
-    agent0 = Agent(board.size)
-    agent1 = Agent(board.size)
+    agent = Agent(board.size)
 
     optimizer = tf.keras.optimizers.Adam(lr=args.lr)
 
-    for e in range(args.epochs):
-        samples = collect_samples(agent0, agent1, args.epoch_games)
+    checkpoint = tf.train.Checkpoint(step=tf.Variable(1, dtype=tf.int64), optimizer=optimizer, net=agent)
+    checkpoint_manager = tf.train.CheckpointManager(checkpoint, os.path.join(job_dir, 'checkpoints'), max_to_keep=None)
+    metrics_writer = tf.summary.create_file_writer(os.path.join(job_dir, 'metrics'))
 
-        for (states, action_probabilities, action_indices, state_values, rewards) in batches(samples, args.batch_size):
-            loss = train(
-                agent0,
-                optimizer,
-                tf.convert_to_tensor(states, dtype=tf.float32),
-                tf.convert_to_tensor(action_probabilities, dtype=tf.float32),
-                tf.convert_to_tensor(action_indices, dtype=tf.int32),
-                tf.convert_to_tensor(state_values, dtype=tf.float32),
-                tf.convert_to_tensor(rewards, dtype=tf.float32),
-            )
+    try:
+        ray.init(num_cpus=args.num_cpus)
+        checkpoint_manager.save()
 
-            print(loss)
+        with metrics_writer.as_default():
+            for e in range(args.epochs):
+                print('Epoch: %d' % e)
+                t = time.time()
+                samples, stats = collect_samples(checkpoint_manager.checkpoints, board.size, args.epoch_games, n_partitions=args.num_cpus)
+                print('Time to collect samples: %.4f' % (time.time() - t))
+
+                for (states, action_probabilities, action_indices, state_values, rewards) in batches(samples, args.batch_size):
+                    loss = train(
+                        agent,
+                        optimizer,
+                        tf.convert_to_tensor(states, dtype=tf.float32),
+                        tf.convert_to_tensor(action_probabilities, dtype=tf.float32),
+                        tf.convert_to_tensor(action_indices, dtype=tf.int32),
+                        tf.convert_to_tensor(state_values, dtype=tf.float32),
+                        tf.convert_to_tensor(rewards, dtype=tf.float32),
+                    )
+                    tf.summary.scalar('loss', loss, step=checkpoint.step)
+                    tf.summary.scalar('mean_advantage', tf.reduce_mean(tf.convert_to_tensor(rewards, dtype=tf.float32) - tf.convert_to_tensor(state_values, dtype=tf.float32)), step=checkpoint.step)
+                    checkpoint.step.assign_add(1)
+
+                # Write stats
+                for key, val in stats.items():
+                    tf.summary.scalar(key, val, step=checkpoint.step)
+                
+                checkpoint_manager.save()
+
+    finally:
+        ray.shutdown()
+
 
 
 if __name__ == '__main__':
     parser = ArgumentParser()
+    parser.add_argument('--job-dir', type=str, required=True)
     parser.add_argument('--epochs', type=int, default=20)
-    parser.add_argument('--epoch_games', type=int, default=5)
+    parser.add_argument('--epoch-games', type=int, default=5)
     parser.add_argument('--batch-size', type=int, default=32)
     parser.add_argument('--lr', type=float, default=1e-3)
+    parser.add_argument('--num-cpus', type=int, default=cpu_count())
 
     main(parser.parse_args())
