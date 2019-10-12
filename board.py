@@ -8,7 +8,7 @@ import numpy as np
 from utils import generate_directions
 
 
-class Position(namedtuple('Position', ('r_i', 'c_i', 'directions'))):
+class Position(namedtuple('Position', ('r_i', 'c_i', 'directions', 'total_steps'))):
     pass
 
 
@@ -38,6 +38,9 @@ class Board:
         player_positions = np.asarray(list(self._board[1::2]), dtype=np.int8)
 
         return np.dot(occupancy, 1 - player_positions), np.dot(occupancy, player_positions)
+
+    def score(self, color):
+        return self.scores()[color]
 
     def to_tensor(self, color):
         t = np.empty(shape=(self._size, self._size, 3), dtype=np.uint8)
@@ -71,14 +74,16 @@ class Board:
                     continue
 
                 directions = []
+                total_steps = 0
                 for (r_direction, c_direction) in generate_directions(self._size, r_i, c_i):
                     num_steps = self._traverse_direction(color, r_i, c_i, r_direction, c_direction)
 
                     if num_steps > 0:
+                        total_steps += num_steps
                         directions.append((r_direction, c_direction, num_steps))
 
                 if len(directions) > 0:
-                    valid_positions[(r_i, c_i)] = Position(r_i, c_i, directions)
+                    valid_positions[(r_i, c_i)] = Position(r_i, c_i, directions, total_steps)
 
         return valid_positions
 

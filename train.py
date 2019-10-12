@@ -11,20 +11,8 @@ import tensorflow as tf
 
 from board import Board
 from agent import Agent
-from utils import sample_checkpoint
-
-
-def get_state(board, color):
-    valid_positions = board.valid_positions(color)
-    valid_positions_mask = np.zeros(shape=(board.size, board.size, 1), dtype=np.uint8)
-    valid_positions_mask[tuple(zip(*valid_positions.keys()))] = 1
-
-    state = np.concatenate([
-        valid_positions_mask,
-        board.to_tensor(color)
-    ], axis=-1)
-
-    return state, valid_positions, valid_positions_mask
+from player import RLPlayer, GreedyPlayer, GreedyTreeSearchPlayer, AlphaBetaPlayer
+from utils import sample_checkpoint, get_state
 
 
 def play_game(agent0, agent1):
@@ -66,28 +54,6 @@ def play_game(agent0, agent1):
     return samples_buffer, reward, steps
 
 
-# def collect_samples(agent0, agent1, n_games=1, gamma=0.99):
-#     samples  = []
-#     total_steps, total_wins, total_losses = 0, 0, 0
-#     for _ in range(n_games):
-#         game_samples, reward, game_steps = play_game(agent0, agent1)
-#         total_steps += game_steps
-#         total_wins += max(0, reward)
-#         total_losses += -min(0, reward)
-
-#         # Append discounted reward
-#         for i in range(len(game_samples)):
-#             game_samples[i].append(reward * (gamma ** (len(game_samples) - i)))
-
-#         samples.extend(game_samples)
-
-#     return samples, {
-#         'avg_game_length': total_steps / float(n_games),
-#         'win_rate': total_wins / float(n_games),
-#         'loss_rate': total_losses / float(n_games),
-#     }
-
-
 @ray.remote
 def play_games(agent0_checkpoint, agent1_checkpoint, board_size, n_games, gamma):
     agent0 = Agent(board_size)
@@ -110,6 +76,37 @@ def play_games(agent0_checkpoint, agent1_checkpoint, board_size, n_games, gamma)
         samples.extend(game_samples)
 
     return samples, total_steps, total_wins, total_losses
+
+
+@ray.remote
+def run_benchmark(agent_checkpoint, opponent_class, board_size):
+    agent = Agent(board_size)
+    tf.train.Checkpoint(net=agent).restore(agent_checkpoint).expect_partial()
+
+    players = [
+        RLPlayer(agent, 0),
+        opponent_class(1),
+    ]
+
+    board = Board(board_size)
+    curr_player_idx = random.choice([0, 1])
+
+    while True:
+        valid_positions = board.valid_positions(curr_player_idx)
+        if len(valid_positions) == 0:
+            break
+
+        position_id = players[curr_player_idx].move(board)
+        board.apply_position(curr_player_idx, valid_positions[position_id])
+        curr_player_idx = 1 - curr_player_idx
+
+    scores = board.scores()
+    if scores[0] > scores[1]:
+        return 1
+    elif scores[0] < scores[1]:
+        return -1
+
+    return 0
 
 
 def collect_samples(checkpoints, board_size, n_games=1, n_partitions=1, gamma=0.99):
@@ -196,6 +193,12 @@ def main(args):
     checkpoint_manager = tf.train.CheckpointManager(checkpoint, os.path.join(job_dir, 'checkpoints'), max_to_keep=None)
     metrics_writer = tf.summary.create_file_writer(os.path.join(job_dir, 'metrics'))
 
+    ref_agents = {
+        'greedy': GreedyPlayer,
+        'greedy_tree_search': GreedyTreeSearchPlayer,
+        'alpha_beta': AlphaBetaPlayer,
+    }
+
     try:
         ray.init(num_cpus=args.num_cpus)
         checkpoint_manager.save()
@@ -206,6 +209,9 @@ def main(args):
                 t = time.time()
                 samples, stats = collect_samples(checkpoint_manager.checkpoints, board.size, args.epoch_games, n_partitions=args.num_cpus)
                 print('Time to collect samples: %.4f' % (time.time() - t))
+
+                for key, val in stats.items():
+                    tf.summary.scalar(key, val, step=checkpoint.step)
 
                 for (states, action_probabilities, action_indices, state_values, rewards) in batches(samples, args.batch_size):
                     loss = train(
@@ -220,12 +226,38 @@ def main(args):
                     tf.summary.scalar('loss', loss, step=checkpoint.step)
                     tf.summary.scalar('mean_advantage', tf.reduce_mean(tf.convert_to_tensor(rewards, dtype=tf.float32) - tf.convert_to_tensor(state_values, dtype=tf.float32)), step=checkpoint.step)
                     checkpoint.step.assign_add(1)
-
-                # Write stats
-                for key, val in stats.items():
-                    tf.summary.scalar(key, val, step=checkpoint.step)
                 
                 checkpoint_manager.save()
+
+                if e > 0 and e % 10 == 0:
+                    t = time.time()
+
+                    # Run benchmarks
+                    benchmark_futures = []
+                    benchmark_future_names = {}
+                    for name, player in ref_agents.items():
+                        for _ in range(args.benchmark_games):
+                            future_id = run_benchmark.remote(checkpoint_manager.latest_checkpoint, player, board.size)
+                            benchmark_futures.append(future_id)
+                            benchmark_future_names[future_id] = name
+
+                    player_stats = {name: [0, 0] for name in ref_agents.keys()}
+                    while benchmark_futures:
+                        done_ids, benchmark_futures = ray.wait(benchmark_futures)
+
+                        for future_id in done_ids:
+                            result = ray.get(future_id)
+                            name = benchmark_future_names[future_id]
+                            if result == 1:
+                                player_stats[name][0] += 1
+                            elif result == -1:
+                                player_stats[name][1] += 1
+
+                    for name, (wins, losses) in player_stats.items():
+                        tf.summary.scalar('benchmark/%s/wins' % name, wins / args.benchmark_games, step=checkpoint.step)
+                        tf.summary.scalar('benchmark/%s/losses' % name, losses / args.benchmark_games, step=checkpoint.step)
+
+                    print('Time to run benchmarks: %.4f' % (time.time() - t))
 
     finally:
         ray.shutdown()
@@ -237,6 +269,7 @@ if __name__ == '__main__':
     parser.add_argument('--job-dir', type=str, required=True)
     parser.add_argument('--epochs', type=int, default=20)
     parser.add_argument('--epoch-games', type=int, default=5)
+    parser.add_argument('--benchmark-games', type=int, default=10)
     parser.add_argument('--batch-size', type=int, default=32)
     parser.add_argument('--lr', type=float, default=1e-3)
     parser.add_argument('--num-cpus', type=int, default=cpu_count())
