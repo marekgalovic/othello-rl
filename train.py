@@ -11,11 +11,12 @@ import tensorflow as tf
 
 from board import Board
 from agent import Agent
+from mcts import mcts, TerminalStateException
 from player import RLPlayer, GreedyPlayer, GreedyTreeSearchPlayer, AlphaBetaPlayer
 from utils import sample_checkpoint, get_state
 
 
-def play_game(agent0, agent1):
+def play_game(agent0, agent1, mcts_iter):
     board = Board()
 
     steps = 0
@@ -26,21 +27,35 @@ def play_game(agent0, agent1):
     while True:
         steps += 1
         agent = agents[curr_agent_idx]
-        state, valid_positions, valid_positions_mask = get_state(board, curr_agent_idx)
 
-        if len(valid_positions) == 0:
+        try:
+            valid_positions, valid_positions_ids, position_values, state, action_p, value = mcts(board, agent, curr_agent_idx, n_iter=mcts_iter)
+        except TerminalStateException:
             break
 
-        action_p, value = agent(tf.convert_to_tensor([state], dtype=tf.float32))
-        action_p = action_p[0].numpy() * valid_positions_mask.reshape((-1,))
-        value = value[0].numpy()
-        action_idx = np.random.choice(len(action_p), p=action_p / np.sum(action_p))
+        position_idx = np.argmax(position_values)
+        position = valid_positions[position_idx]
 
         if curr_agent_idx == 0:
-            samples_buffer.append([state, action_p[action_idx], action_idx, value])
+            samples_buffer.append([state, action_p[position_idx], valid_positions_ids[position_idx], value])
 
-        position = (int(action_idx / board.size), int(action_idx % board.size))
-        board.apply_position(curr_agent_idx, valid_positions[position])
+        board.apply_position(curr_agent_idx, position)
+
+        # state, valid_positions, valid_positions_mask = get_state(board, curr_agent_idx)
+
+        # if len(valid_positions) == 0:
+        #     break
+
+        # action_p, value = agent(tf.convert_to_tensor([state], dtype=tf.float32))
+        # action_p = action_p[0].numpy() * valid_positions_mask.reshape((-1,))
+        # value = value[0].numpy()
+        # action_idx = np.random.choice(len(action_p), p=action_p / np.sum(action_p))
+
+        # if curr_agent_idx == 0:
+        #     samples_buffer.append([state, action_p[action_idx], action_idx, value])
+
+        # position = (int(action_idx / board.size), int(action_idx % board.size))
+        # board.apply_position(curr_agent_idx, valid_positions[position])
 
         curr_agent_idx = 1 - curr_agent_idx
 
@@ -55,7 +70,7 @@ def play_game(agent0, agent1):
 
 
 @ray.remote
-def play_games(agent0_checkpoint, agent1_checkpoint, board_size, n_games, gamma):
+def play_games(agent0_checkpoint, agent1_checkpoint, board_size, n_games, mcts_iter, gamma):
     agent0 = Agent(board_size)
     tf.train.Checkpoint(net=agent0).restore(agent0_checkpoint).expect_partial()
     agent1 = Agent(board_size)
@@ -64,7 +79,7 @@ def play_games(agent0_checkpoint, agent1_checkpoint, board_size, n_games, gamma)
     samples  = []
     total_steps, total_wins, total_losses = 0, 0, 0
     for _ in range(n_games):
-        game_samples, reward, game_steps = play_game(agent0, agent1)
+        game_samples, reward, game_steps = play_game(agent0, agent1, mcts_iter)
         total_steps += game_steps
         total_wins += max(0, reward)
         total_losses += -min(0, reward)
@@ -109,12 +124,12 @@ def run_benchmark(agent_checkpoint, opponent_class, board_size):
     return 0
 
 
-def collect_samples(checkpoints, board_size, n_games=1, n_partitions=1, gamma=0.99):
+def collect_samples(checkpoints, board_size, n_games=1, mcts_iter=10, n_partitions=1, gamma=0.99):
     partition_games = int(np.ceil(n_games / n_partitions))
 
     futures = []
     for _ in range(n_partitions):
-        futures.append(play_games.remote(checkpoints[-1], sample_checkpoint(checkpoints, p_latest=0.9), board_size, partition_games, gamma))
+        futures.append(play_games.remote(checkpoints[-1], sample_checkpoint(checkpoints, p_latest=0.9), board_size, partition_games, mcts_iter, gamma))
 
     samples  = []
     total_steps, total_wins, total_losses = 0, 0, 0
@@ -207,7 +222,7 @@ def main(args):
             for e in range(args.epochs):
                 print('Epoch: %d' % e)
                 t = time.time()
-                samples, stats = collect_samples(checkpoint_manager.checkpoints, board.size, args.epoch_games, n_partitions=args.num_cpus)
+                samples, stats = collect_samples(checkpoint_manager.checkpoints, board.size, args.epoch_games, args.mcts_iter, n_partitions=args.num_cpus)
                 print('Time to collect samples: %.4f' % (time.time() - t))
 
                 for key, val in stats.items():
@@ -269,6 +284,7 @@ if __name__ == '__main__':
     parser.add_argument('--job-dir', type=str, required=True)
     parser.add_argument('--epochs', type=int, default=20)
     parser.add_argument('--epoch-games', type=int, default=5)
+    parser.add_argument('--mcts-iter', type=int, default=30)
     parser.add_argument('--benchmark-games', type=int, default=10)
     parser.add_argument('--batch-size', type=int, default=32)
     parser.add_argument('--lr', type=float, default=1e-3)

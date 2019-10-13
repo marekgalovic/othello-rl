@@ -51,4 +51,3 @@ class Agent(tf.keras.Model):
         policy = self._policy(policy_conv)
 
         return tf.nn.softmax(policy), value
-
