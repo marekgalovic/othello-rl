@@ -22,6 +22,7 @@ class Node:
         self._state = None
         self._valid_positions = None
         self._valid_positions_ids = None
+        self._p_v = None
 
     @property
     def board(self):
@@ -65,6 +66,15 @@ class Node:
 
         return self._valid_positions_ids
 
+    def get_p_v(self, agent):
+        if self._p_v is None:
+            p, v = agent(tf.convert_to_tensor([self.state[0]], dtype=tf.float32))
+            p = p[0].numpy()[self.valid_positions_ids]
+            v = v[0].numpy()
+            self._p_v = (p, v)
+
+        return self._p_v
+
     def set_children(self, children):
         self._children = children
 
@@ -84,7 +94,8 @@ def mcts(board, agent, color, n_iter=10, c=np.sqrt(2)):
     for i in range(n_iter):
         _traverse(root, agent, color, c)
 
-    position_values, raw_action_p, raw_state_v = _child_values(root, agent, c)
+    raw_action_p, raw_state_v = root.get_p_v(agent)
+    position_values = _child_values(root, agent, c)
     
     return root.valid_positions, root.valid_positions_ids, position_values, root.state[0], raw_action_p, raw_state_v
 
@@ -105,16 +116,13 @@ def mcts(board, agent, color, n_iter=10, c=np.sqrt(2)):
 
 def _child_values(node, agent, c):
     child_visit_counts = np.asarray([c.visits for c in node.children], dtype=np.float32)
+    p, _ = node.get_p_v(agent)
 
-    p, v = agent(tf.convert_to_tensor([node.state[0]], dtype=tf.float32))
-    p = p[0].numpy()[node.valid_positions_ids]
-    v = v[0].numpy()
-
-    return c * (p / np.sum(p)) * (np.sqrt(node.visits) / (1 + child_visit_counts)), p, v
+    return c * (p / np.sum(p)) * (np.sqrt(node.visits) / (1 + child_visit_counts))
 
 
 def _select_child(node, agent, c, greedy=True):
-    child_values, _, _ = _child_values(node, agent, c)
+    child_values = _child_values(node, agent, c)
 
     if greedy:
         return node.children[np.argmax(child_values)]
@@ -186,7 +194,6 @@ def _estimate_outcome(node, agent, root_color):
     node.increment_visits()
 
     state, _, _ = get_state(node.board, root_color)
-
     _, value = agent(tf.convert_to_tensor([state], dtype=tf.float32))
 
     scores = [0,0]
@@ -220,7 +227,7 @@ def _estimate_outcome(node, agent, root_color):
 #             break
 
 #         t = time.time()
-#         mcts(board, agent, curr_player_idx, n_iter=100)
+#         mcts(board, agent, curr_player_idx, n_iter=args.n_iter)
 #         print('Time: %.4f' % float(time.time() - t))
 #         raise ValueError
 
@@ -228,5 +235,6 @@ def _estimate_outcome(node, agent, root_color):
 # if __name__ == '__main__':
 #     parser = ArgumentParser()
 #     parser.add_argument('--checkpoint', type=str, required=True)
+#     parser.add_argument('--n-iter', type=int, default=100)
 
 #     main(parser.parse_args())

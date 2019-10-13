@@ -244,7 +244,7 @@ def main(args):
                 
                 checkpoint_manager.save()
 
-                if e > 0 and e % 10 == 0:
+                if e > 0 and e % 5 == 0:
                     t = time.time()
 
                     # Run benchmarks
