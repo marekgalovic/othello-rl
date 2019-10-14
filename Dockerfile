@@ -1,5 +1,12 @@
 FROM tensorflow/tensorflow:2.0.0-gpu-py3
 
+# Dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends \
+         wget \
+         curl \
+         python-dev && \
+     rm -rf /var/lib/apt/lists/*
+
 # Cloud ML Stuff
 RUN wget -nv \
     https://dl.google.com/dl/cloudsdk/release/google-cloud-sdk.tar.gz && \
