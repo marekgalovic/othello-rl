@@ -17,6 +17,7 @@ class Node:
 
         self._wins = 0
         self._visits = 0
+        self._value = 0
         self._children = []
 
         self._state = None
@@ -39,6 +40,10 @@ class Node:
     @property
     def visits(self):
         return self._visits
+
+    @property
+    def value(self):
+        return self._value
     
     @property
     def children(self):
@@ -84,20 +89,27 @@ class Node:
     def increment_visits(self):
         self._visits += 1
 
+    def add_value(self, value):
+        self._value += value
+        if value > 0:
+            self.increment_wins()
 
-def mcts(board, agent, color, n_iter=10, c=np.sqrt(2)):
+
+def mcts(board, agent, color, n_iter=10, c=np.sqrt(2), tau=1):
     root = Node(board.copy(), color)
 
     if len(root.valid_positions) == 0:
         raise TerminalStateException()
 
     for i in range(n_iter):
-        _traverse(root, agent, color, c)
+        _traverse(root, agent, c)
 
     raw_action_p, raw_state_v = root.get_p_v(agent)
-    position_values = _child_values(root, agent, c)
+    child_visit_counts = np.asarray([c.visits for c in root.children], dtype=np.float32)
+    position_p = child_visit_counts ** (1 / tau)
+    position_p /= np.sum(position_p)
     
-    return root.valid_positions, root.valid_positions_ids, position_values, root.state[0], raw_action_p, raw_state_v
+    return root.valid_positions, root.valid_positions_ids, position_p, root.state[0], raw_action_p, raw_state_v
 
 # def _uct_child_scores(node, c=np.sqrt(2)):
 #     def _uct(child):
@@ -116,53 +128,61 @@ def mcts(board, agent, color, n_iter=10, c=np.sqrt(2)):
 
 def _child_values(node, agent, c):
     child_visit_counts = np.asarray([c.visits for c in node.children], dtype=np.float32)
+    child_values = np.asarray([-c.value for c in node.children], dtype=np.float32)
     p, _ = node.get_p_v(agent)
 
-    return c * (p / np.sum(p)) * (np.sqrt(node.visits) / (1 + child_visit_counts))
+    return (child_values / (1 + child_visit_counts)) + c * (p / np.sum(p)) * (np.sqrt(node.visits) / (1 + child_visit_counts))
 
 
-def _select_child(node, agent, c, greedy=True):
+def _select_child(node, agent, c):
     child_values = _child_values(node, agent, c)
 
-    if greedy:
-        return node.children[np.argmax(child_values)]
-
-    return node.children[np.random.choice(len(p), p=child_values/np.sum(child_values))]
+    return node.children[np.argmax(child_values)]
 
 
-def _traverse(node, agent, root_color, c):
+def _normalize_scores(scores, color, v=1):
+    normalized = [0, 0]
+    if scores[color] > scores[1 - color]:
+        normalized[color] = v
+    elif scores[color] < scores[1 - color]:
+        normalized[color] = -v
+
+    normalized[1 - color] = -normalized[color]
+    return normalized
+
+
+def _traverse(node, agent, c):
     # print("Visits: %d, Wins: %d, Children visits: %s" % (node.visits, node.wins, ','.join(list(map(lambda c: str(c.visits), node.children)))))
     node.increment_visits()
 
     if len(node.children) == 0:
-        # Expand
+        # Terminal
         if len(node.valid_positions) == 0:
             # Terminal node
-            scores = node.board.scores()
-            if scores[root_color] > scores[1 - root_color]:
-                node.increment_wins()
+            scores = _normalize_scores(node.board.scores(), node.color)
+            node.add_value(scores[node.color])
             return scores
 
+        # Expand
         children = []
         for position in node.valid_positions:
             child_board = node.board.copy()
             child_board.apply_position(node.color, position)
             children.append(Node(child_board, 1 - node.color))
-
         node.set_children(children)
+
+        # Rollout
         # scores = _simulate(_select_child(node, agent, c), agent, root_color)
-        scores = _estimate_outcome(_select_child(node, agent, c), agent, root_color)
-        if scores[root_color] > scores[1 - root_color]:
-            node.increment_wins()
+        scores = _estimate_outcome(_select_child(node, agent, c), agent)
+        node.add_value(scores[node.color])
         return scores
 
-    scores = _traverse(_select_child(node, agent, c), agent, root_color, c)
-    if scores[root_color] > scores[1 - root_color]:
-        node.increment_wins()
+    scores = _traverse(_select_child(node, agent, c), agent, c)
+    node.add_value(scores[node.color])
     return scores
 
 
-def _simulate(node, agent, root_color):
+def _simulate(node, agent):
     node.increment_visits()
 
     board = node.board.copy()
@@ -183,26 +203,21 @@ def _simulate(node, agent, root_color):
 
         curr_color = 1 - curr_color
 
-    scores = board.scores()
-    if scores[root_color] > scores[1 - root_color]:
-        node.increment_wins()
-
-    return scores
+    scores = _normalize_scores(board.scores(), node.color)
+    node.add_value(scores[node.color])
 
 
-def _estimate_outcome(node, agent, root_color):
+def _estimate_outcome(node, agent):
     node.increment_visits()
 
-    state, _, _ = get_state(node.board, root_color)
+    state, _, _ = get_state(node.board, node.color)
     _, value = agent(tf.convert_to_tensor([state], dtype=tf.float32))
 
     scores = [0,0]
-    scores[root_color] = value[0].numpy()
-    scores[1 - root_color] = 1 - scores[root_color]
+    scores[node.color] = value[0].numpy()
+    scores[1 - node.color] = -scores[node.color]
 
-    if scores[root_color] > scores[1 - root_color]:
-        node.increment_wins()
-
+    node.add_value(scores[node.color])
     return scores
 
 
@@ -227,7 +242,7 @@ def _estimate_outcome(node, agent, root_color):
 #             break
 
 #         t = time.time()
-#         mcts(board, agent, curr_player_idx, n_iter=args.n_iter)
+#         _, _, action_p, _, _, _ = mcts(board, agent, curr_player_idx, n_iter=args.n_iter)
 #         print('Time: %.4f' % float(time.time() - t))
 #         raise ValueError
 

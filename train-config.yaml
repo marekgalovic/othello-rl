@@ -1,0 +1,105 @@
+cluster_name: othello-rl
+
+min_workers: 4
+
+max_workers: 6
+
+initial_workers: 5
+
+autoscaling_mode: aggresive
+
+docker:
+  container_name: "ray-othello-rl-tf"
+  head_image: tensorflow/tensorflow:2.0.0-gpu-py3
+  head_run_options:
+    - --runtime-nvidia
+
+  worker_image: tensorflow/tensorflow:2.0.0-py3
+  worker_run_options: []
+
+target_utilization_fraction: 0.9
+
+idle_timeout_minutes: 10
+
+provider:
+  type: gcp
+  region: us-central1
+  availability_zone: us-central1-a
+  project_id: othello-rl
+
+head_node:
+  machineType: n1-standard-8
+  disks:
+    - boot: true
+      autoDelete: true
+      type: PERSISTENT
+      initializeParams:
+        diskSizeGb: 50
+        # sourceImage: 
+  guestAccelerators:
+    - acceleratorType: projects/othello-rl/zones/us-west1-b/acceleratorTypes/nvidia-tesla-k80
+      acceleratorCount: 1
+  metadata:
+    items:
+      - key: install-nvidia-driver
+        value: "True"
+  scheduling:
+    - preemptible: true
+    - onHostMaintenance: TERMINATE
+
+worker_nodes:
+  machineType: n1-highcpu-32
+  disks:
+    - boot: true
+      autoDelete: true
+      type: PERSISTENT
+      initializeParams:
+        diskSizeGb: 30
+        # sourceImage: 
+  # guestAccelerators:
+  #   - acceleratorType: projects/<project_id>/zones/us-west1-b/acceleratorTypes/nvidia-tesla-k80
+  #     acceleratorCount: 1
+  # metadata:
+  #   items:
+  #     - key: install-nvidia-driver
+  #       value: "True"
+  scheduling:
+    - preemptible: true
+    - onHostMaintenance: TERMINATE
+
+file_mounts: {
+  "/code": "./"
+}
+
+initialization_commands:
+    # Wait until nvidia drivers are installed
+    - >-
+      timeout 300 bash -c "
+          command -v nvidia-smi && nvidia-smi
+          until [ \$? -eq 0 ]; do
+              command -v nvidia-smi && nvidia-smi
+          done"
+
+setup_commands:
+  - pip install -U ray
+
+head_setup_commands: []
+
+worker_setup_commands: []
+
+head_start_ray_commands:
+  - ray stop
+  - >-
+    ulimit -n 65536;
+    ray start
+    --head
+    --redis-port=6379
+    --object-manager-port=8076
+
+worker_start_ray_commands:
+  - ray stop
+  - >-
+    ulimit -n 65536;
+    ray start
+    --redis-address=$RAY_HEAD_IP:6379
+    --object-manager-port=8076

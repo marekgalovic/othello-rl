@@ -29,11 +29,11 @@ def play_game(agent0, agent1, mcts_iter):
         agent = agents[curr_agent_idx]
 
         try:
-            valid_positions, valid_positions_ids, position_values, state, action_p, value = mcts(board, agent, curr_agent_idx, n_iter=mcts_iter)
+            valid_positions, valid_positions_ids, position_p, state, action_p, value = mcts(board, agent, curr_agent_idx, n_iter=mcts_iter)
         except TerminalStateException:
             break
 
-        position_idx = np.argmax(position_values)
+        position_idx = np.random.choice(len(position_p), p=position_p)
         position = valid_positions[position_idx]
 
         if curr_agent_idx == 0:
