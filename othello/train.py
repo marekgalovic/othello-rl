@@ -195,8 +195,8 @@ def train(agent, optimizer, states, old_action_p, action_indices, state_values, 
 
 def main(args):
     job_dir = os.path.join(args.job_dir, datetime.now().strftime('%Y%m%d%H%M%s'))
-    if not os.path.exists(job_dir):
-        os.makedirs(job_dir)
+    if not tf.io.gfile.exists(job_dir):
+        tf.io.gfile.makedirs(job_dir)
     print('Job dir: %s' % job_dir)
 
     board = Board()

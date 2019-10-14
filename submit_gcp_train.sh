@@ -1,7 +1,7 @@
 #!/bin/bash
 
 JOB_ID="othello_rl_v1_train_$(date +%Y%m%d_%H%M%S)"
-JOB_DIR="gs://othello_rl/v1"
+JOB_DIR="gs://othello_rl/models/v1"
 
 echo "JOB_ID: ${JOB_ID}"
 
