@@ -26,6 +26,9 @@ ENV PATH $PATH:/root/tools/google-cloud-sdk/bin
 # Make sure gsutil will use the default service account
 RUN echo '[GoogleCompute]\nservice_account = default' > /etc/boto.cfg
 
+# Train dependencies
+RUN pip install ray
+
 
 # Copy code
 RUN mkdir /othello
