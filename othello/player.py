@@ -3,6 +3,7 @@ import time
 import numpy as np
 import tensorflow as tf
 
+from mcts import mcts, TerminalStateException
 from utils import get_state
 
 
@@ -36,28 +37,25 @@ class BasePlayer:
 
 class RLPlayer(BasePlayer):
 
-    def __init__(self, agent, color):
+    def __init__(self, agent, color, mcts_iter=30):
         super(RLPlayer, self).__init__(color)
         self._agent = agent
+        self._mcts_iter = int(mcts_iter)
 
     @property
     def agent(self):
         return self._agent
     
     def move(self, board):
-        state, valid_positions, valid_positions_mask = get_state(board, self.color)
-
-        if len(valid_positions) == 0:
+        try:
+            valid_positions, _, position_p, _, _, _ = mcts(board, self.agent, self.color, n_iter=self._mcts_iter)
+        except TerminalStateException:
             return
 
-        action_p, _ = self.agent(tf.convert_to_tensor([state], dtype=tf.float32))
-        action_p = action_p[0].numpy() * valid_positions_mask.reshape((-1,))
-        action_idx = np.random.choice(len(action_p), p=action_p / np.sum(action_p))
+        position_idx = np.random.choice(len(position_p), p=position_p)
+        position = valid_positions[position_idx]
 
-        return (
-            int(action_idx / board.size),
-            int(action_idx % board.size)
-        )
+        return (position.r_i, position.c_i)
 
 
 class GreedyPlayer(BasePlayer):

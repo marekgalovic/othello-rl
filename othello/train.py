@@ -94,12 +94,12 @@ def play_games(agent0_checkpoint, agent1_checkpoint, board_size, n_games, mcts_i
 
 
 @ray.remote
-def run_benchmark(agent_checkpoint, opponent_class, board_size):
+def run_benchmark(agent_checkpoint, opponent_class, board_size, mcts_iter):
     agent = Agent(board_size)
     tf.train.Checkpoint(net=agent).restore(agent_checkpoint).expect_partial()
 
     players = [
-        RLPlayer(agent, 0),
+        RLPlayer(agent, 0, mcts_iter=mcts_iter),
         opponent_class(1),
     ]
 
@@ -252,7 +252,7 @@ def main(args):
                     benchmark_future_names = {}
                     for name, player in ref_agents.items():
                         for _ in range(args.benchmark_games):
-                            future_id = run_benchmark.remote(checkpoint_manager.latest_checkpoint, player, board.size)
+                            future_id = run_benchmark.remote(checkpoint_manager.latest_checkpoint, player, board.size, args.mcts_iter)
                             benchmark_futures.append(future_id)
                             benchmark_future_names[future_id] = name
 
