@@ -52,7 +52,7 @@ class RLPlayer(BasePlayer):
         except TerminalStateException:
             return
 
-        position_idx = np.random.choice(len(position_p), p=position_p)
+        position_idx = np.argmax(position_p)
         position = valid_positions[position_idx]
 
         return (position.r_i, position.c_i)

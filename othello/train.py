@@ -93,6 +93,35 @@ def play_games(agent0_checkpoint, agent1_checkpoint, board_size, n_games, mcts_i
     return samples, total_steps, total_wins, total_losses
 
 
+def collect_samples(checkpoints, board_size, n_games=1, mcts_iter=10, n_partitions=1, gamma=0.99):
+    partition_games = int(np.ceil(n_games / n_partitions))
+
+    futures = []
+    for _ in range(n_partitions):
+        futures.append(play_games.remote(checkpoints[-1], sample_checkpoint(checkpoints, p_latest=0.9), board_size, partition_games, mcts_iter, gamma))
+
+    samples  = []
+    total_steps, total_wins, total_losses = 0, 0, 0
+    while futures:
+        done_ids, futures = ray.wait(futures)
+
+        for future_id in done_ids:
+            (game_samples, steps, wins, losses) = ray.get(future_id)
+
+            total_steps += steps
+            total_wins += wins
+            total_losses += losses
+            samples.extend(game_samples)
+
+    total_games = n_partitions * partition_games
+
+    return samples, {
+        'avg_game_length': total_steps / float(total_games),
+        'win_rate': total_wins / float(total_games),
+        'loss_rate': total_losses / float(total_games),
+    }
+
+
 @ray.remote
 def run_benchmark(agent_checkpoint, opponent_class, board_size, mcts_iter):
     agent = Agent(board_size)
@@ -122,35 +151,6 @@ def run_benchmark(agent_checkpoint, opponent_class, board_size, mcts_iter):
         return -1
 
     return 0
-
-
-def collect_samples(checkpoints, board_size, n_games=1, mcts_iter=10, n_partitions=1, gamma=0.99):
-    partition_games = int(np.ceil(n_games / n_partitions))
-
-    futures = []
-    for _ in range(n_partitions):
-        futures.append(play_games.remote(checkpoints[-1], sample_checkpoint(checkpoints, p_latest=0.9), board_size, partition_games, mcts_iter, gamma))
-
-    samples  = []
-    total_steps, total_wins, total_losses = 0, 0, 0
-    while futures:
-        done_ids, futures = ray.wait(futures)
-
-        for future_id in done_ids:
-            (game_samples, steps, wins, losses) = ray.get(future_id)
-
-            total_steps += steps
-            total_wins += wins
-            total_losses += losses
-            samples.extend(game_samples)
-
-    total_games = n_partitions * partition_games
-
-    return samples, {
-        'avg_game_length': total_steps / float(total_games),
-        'win_rate': total_wins / float(total_games),
-        'loss_rate': total_losses / float(total_games),
-    }
 
 
 def batches(samples, batch_size):
@@ -202,7 +202,13 @@ def main(args):
     board = Board()
     agent = Agent(board.size)
 
-    optimizer = tf.keras.optimizers.Adam(lr=args.lr)
+    lr_schedule = tf.keras.optimizers.schedules.ExponentialDecay(
+        args.lr,
+        (args.epoch_games * 60 * 10) / args.batch_size,
+        args.lr_decay
+    )
+
+    optimizer = tf.keras.optimizers.Adam(lr=lr_schedule)
 
     checkpoint = tf.train.Checkpoint(step=tf.Variable(1, dtype=tf.int64), optimizer=optimizer, net=agent)
     checkpoint_manager = tf.train.CheckpointManager(checkpoint, os.path.join(job_dir, 'checkpoints'), max_to_keep=None)
@@ -284,10 +290,11 @@ if __name__ == '__main__':
     parser.add_argument('--job-dir', type=str, required=True)
     parser.add_argument('--epochs', type=int, default=20)
     parser.add_argument('--epoch-games', type=int, default=5)
-    parser.add_argument('--mcts-iter', type=int, default=30)
+    parser.add_argument('--mcts-iter', type=int, default=50)
     parser.add_argument('--benchmark-games', type=int, default=10)
     parser.add_argument('--batch-size', type=int, default=32)
-    parser.add_argument('--lr', type=float, default=1e-3)
+    parser.add_argument('--lr', type=float, default=1e-4)
+    parser.add_argument('--lr-decay', type=float, default=0.96)
     parser.add_argument('--num-cpus', type=int, default=cpu_count())
 
     main(parser.parse_args())
