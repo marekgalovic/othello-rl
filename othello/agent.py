@@ -2,6 +2,39 @@ import tensorflow as tf
 from tensorflow.keras import layers
 
 
+def gather_action_probabilities(p, action_ids):
+    gather_indices = tf.stack([
+        tf.range(tf.shape(action_ids)[0]),
+        action_ids
+    ], -1)
+
+    return tf.gather_nd(p, gather_indices)
+
+
+def ppo_loss(new_values, values, p, p_old, action_ids, rewards, eps=0.2, c=1.0):
+    advantage = rewards - values
+
+    p = gather_action_probabilities(p, action_ids)
+    r = p / p_old
+
+    l_pg = tf.reduce_min([r * advantage, tf.clip_by_value(r, 1-eps, 1+eps) * advantage], axis=0)
+    l_v = tf.square(new_values - rewards)
+
+    return tf.reduce_mean(-l_pg + c*l_v)
+
+
+def train(agent, optimizer, states, old_action_p, action_indices, state_values, rewards):
+    with tf.GradientTape() as t:
+        action_p, new_state_values = agent(states)
+
+        loss = ppo_loss(new_state_values, state_values, action_p, old_action_p, action_indices, rewards)
+
+    grads = t.gradient(loss, agent.trainable_variables)
+    optimizer.apply_gradients(zip(grads, agent.trainable_variables))
+
+    return loss
+
+
 def residual_conv2d(filters, kernel_size, activation=tf.nn.relu, name=None):
     conv1 = layers.Conv2D(
         filters,

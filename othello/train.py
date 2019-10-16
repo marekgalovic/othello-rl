@@ -10,7 +10,7 @@ import numpy as np
 import tensorflow as tf
 
 from board import Board
-from agent import Agent
+from agent import Agent, train
 from mcts import mcts, TerminalStateException
 from player import RLPlayer, GreedyPlayer, GreedyTreeSearchPlayer, AlphaBetaPlayer
 from utils import sample_checkpoint, get_state
@@ -160,39 +160,6 @@ def batches(samples, batch_size):
         yield zip(*samples[i*batch_size:i*batch_size+batch_size])
 
 
-def gather_action_probabilities(p, action_ids):
-    gather_indices = tf.stack([
-        tf.range(tf.shape(action_ids)[0]),
-        action_ids
-    ], -1)
-
-    return tf.gather_nd(p, gather_indices)
-
-
-def ppo_loss(new_values, values, p, p_old, action_ids, rewards, eps=0.2, c=1.0):
-    advantage = rewards - values
-
-    p = gather_action_probabilities(p, action_ids)
-    r = p / p_old
-
-    l_pg = tf.reduce_min([r * advantage, tf.clip_by_value(r, 1-eps, 1+eps) * advantage], axis=0)
-    l_v = tf.square(new_values - rewards)
-
-    return tf.reduce_mean(-l_pg + c*l_v)
-
-
-def train(agent, optimizer, states, old_action_p, action_indices, state_values, rewards):
-    with tf.GradientTape() as t:
-        action_p, new_state_values = agent(states)
-
-        loss = ppo_loss(new_state_values, state_values, action_p, old_action_p, action_indices, rewards)
-
-    grads = t.gradient(loss, agent.trainable_variables)
-    optimizer.apply_gradients(zip(grads, agent.trainable_variables))
-
-    return loss
-
-
 def main(args):
     job_dir = os.path.join(args.job_dir, datetime.now().strftime('%Y%m%d%H%M%s'))
     if not tf.io.gfile.exists(job_dir):
@@ -204,11 +171,11 @@ def main(args):
 
     lr_schedule = tf.keras.optimizers.schedules.ExponentialDecay(
         args.lr,
-        (args.epoch_games * 60 * 10) / args.batch_size,
+        int((args.epoch_games * 60 * 10) / args.batch_size),
         args.lr_decay
     )
 
-    optimizer = tf.keras.optimizers.Adam(lr=lr_schedule)
+    optimizer = tf.keras.optimizers.Adam(learning_rate=lr_schedule)
 
     checkpoint = tf.train.Checkpoint(step=tf.Variable(1, dtype=tf.int64), optimizer=optimizer, net=agent)
     checkpoint_manager = tf.train.CheckpointManager(checkpoint, os.path.join(job_dir, 'checkpoints'), max_to_keep=None)
