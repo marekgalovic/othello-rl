@@ -29,35 +29,33 @@ def play_game(agent0, agent1, mcts_iter):
         agent = agents[curr_agent_idx]
 
         # MCTS
-        # try:
-        #     valid_positions, valid_positions_ids, position_p, state, action_p, value = mcts(board, agent, curr_agent_idx, n_iter=mcts_iter)
-        # except TerminalStateException:
-        #     break
+        try:
+            root_node, mcts_p, action_p, value = mcts(board, agent, curr_agent_idx, n_iter=mcts_iter)
+        except TerminalStateException:
+            break
 
-        # position_idx = np.random.choice(len(position_p), p=position_p)
-        # position = valid_positions[position_idx]
-
-        # if curr_agent_idx == 0:
-        #     samples_buffer.append([state, action_p[position_idx], valid_positions_ids[position_idx], value])
-
-        # board.apply_position(curr_agent_idx, position)
-
-        # Pure RL
-        state, valid_positions, valid_positions_mask = get_state(board, curr_agent_idx)
-
+        state, valid_positions = (root_node.state[0], root_node.state[1])
         if len(valid_positions) == 0:
             break
 
-        action_p, value = agent(tf.convert_to_tensor([state], dtype=tf.float32))
-        action_p = action_p[0].numpy() * valid_positions_mask.reshape((-1,))
-        value = value[0].numpy()
-        action_idx = np.random.choice(len(action_p), p=action_p / np.sum(action_p))
+        action_idx = np.random.choice(len(mcts_p), p=mcts_p)
+
+        # Pure RL
+        # state, valid_positions, valid_positions_mask = get_state(board, curr_agent_idx)
+
+        # if len(valid_positions) == 0:
+        #     break
+
+        # action_p, value = agent(tf.convert_to_tensor([state], dtype=tf.float32))
+        # action_p = action_p[0].numpy() * valid_positions_mask.reshape((-1,))
+        # value = value[0].numpy()
+        # action_idx = np.random.choice(len(action_p), p=action_p / np.sum(action_p))
 
         if curr_agent_idx == 0:
             samples_buffer.append([state, action_p[action_idx], action_idx, value])
 
-        position = (int(action_idx / board.size), int(action_idx % board.size))
-        board.apply_position(curr_agent_idx, valid_positions[position])
+        position_key = (int(action_idx / board.size), int(action_idx % board.size))
+        board.apply_position(curr_agent_idx, valid_positions[position_key])
 
         curr_agent_idx = 1 - curr_agent_idx
 

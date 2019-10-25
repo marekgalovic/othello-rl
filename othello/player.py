@@ -48,23 +48,21 @@ class RLPlayer(BasePlayer):
     
     def move(self, board):
         # MCTS
-        # try:
-        #     valid_positions, _, position_p, _, _, _ = mcts(board, self.agent, self.color, n_iter=self._mcts_iter)
-        # except TerminalStateException:
-        #     return
-
-        # position_idx = np.argmax(position_p)
-        # position = valid_positions[position_idx]
-        # return (position.r_i, position.c_i)
-
-        # Pure RL
-        state, valid_positions, valid_positions_mask = get_state(board, self.color)
-        if len(valid_positions) == 0:
+        try:
+          root_node, mcts_p, action_p, value = mcts(board, self.agent, self.color, n_iter=self._mcts_iter)
+        except TerminalStateException:
             return
 
-        action_p, _ = self.agent(tf.convert_to_tensor([state], dtype=tf.float32))
-        action_p = action_p[0].numpy() * valid_positions_mask.reshape((-1,))
-        action_idx = np.random.choice(len(action_p), p=action_p / np.sum(action_p))
+        action_idx = np.argmax(mcts_p)
+
+        # Pure RL
+        # state, valid_positions, valid_positions_mask = get_state(board, self.color)
+        # if len(valid_positions) == 0:
+        #     return
+
+        # action_p, _ = self.agent(tf.convert_to_tensor([state], dtype=tf.float32))
+        # action_p = action_p[0].numpy() * valid_positions_mask.reshape((-1,))
+        # action_idx = np.random.choice(len(action_p), p=action_p / np.sum(action_p))
 
         return (int(action_idx / board.size), int(action_idx % board.size))
 

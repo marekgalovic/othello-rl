@@ -1,5 +1,3 @@
-# from argparse import ArgumentParser
-
 import numpy as np
 import tensorflow as tf
 
@@ -18,11 +16,11 @@ class Node:
         self._wins = 0
         self._visits = 0
         self._value = 0
-        self._children = []
+        self._children = {}
 
         self._state = None
         self._valid_positions = None
-        self._valid_positions_ids = None
+        self._valid_positions_indices = None
         self._p_v = None
 
     @property
@@ -60,21 +58,21 @@ class Node:
     def valid_positions(self):
         if self._valid_positions is None:
             valid_positions = self.board.valid_positions(self.color)
-            self._valid_positions = list(sorted(valid_positions.values(), key=lambda p: p.r_i * self.board.size + p.c_i))
+            self._valid_positions = list(sorted(valid_positions.values(), key=lambda p: p.action_index(self.board)))
 
         return self._valid_positions
 
     @property
-    def valid_positions_ids(self):
-        if self._valid_positions_ids is None:
-            self._valid_positions_ids = [p.r_i * self.board.size + p.c_i for p in self.valid_positions]
+    def valid_positions_indices(self):
+        if self._valid_positions_indices is None:
+            self._valid_positions_indices = [p.action_index(self.board) for p in self.valid_positions]
 
-        return self._valid_positions_ids
+        return self._valid_positions_indices
 
     def get_p_v(self, agent):
         if self._p_v is None:
             p, v = agent(tf.convert_to_tensor([self.state[0]], dtype=tf.float32))
-            p = p[0].numpy()[self.valid_positions_ids]
+            p = p[0].numpy()
             v = v[0].numpy()
             self._p_v = (p, v)
 
@@ -89,78 +87,34 @@ class Node:
     def increment_visits(self):
         self._visits += 1
 
-    def add_value(self, value):
-        self._value += value
-        if value > 0:
+    def update_value(self, scores):
+        self._value += scores[self.color]
+        if scores[self.color] > 0:
             self.increment_wins()
 
 
-def mcts(board, agent, color, n_iter=10, c=np.sqrt(2), tau=1):
+def mcts(board, agent, color, n_iter=50, c=4., tau=1.):
     root = Node(board.copy(), color)
 
     if len(root.valid_positions) == 0:
         raise TerminalStateException()
 
     for i in range(n_iter):
-        _traverse(root, agent, c)
+        _traverse(agent, root, c)
 
-    raw_action_p, raw_state_v = root.get_p_v(agent)
-    child_visit_counts = np.asarray([c.visits for c in root.children], dtype=np.float32)
-    position_p = child_visit_counts ** (1 / tau)
-    position_p /= np.sum(position_p)
-    
-    return root.valid_positions, root.valid_positions_ids, position_p, root.state[0], raw_action_p, raw_state_v
+    p, v = root.get_p_v(agent)
 
-# def _uct_child_scores(node, c=np.sqrt(2)):
-#     def _uct(child):
-#         if child.visits == 0:
-#             return np.inf
-
-#         return child.wins / child.visits + c * np.sqrt(np.log(node.visits) / child.visits)
-
-#     return np.asarray(list(map(_uct, node.children)))
+    return root, _mcts_p(root, tau), p, v
 
 
-# def _select_child(node, c=np.sqrt(2)):
-#     idx = np.argmax(_uct_child_scores(node, c))
-#     return node.children[idx]
-
-
-def _child_values(node, agent, c):
-    child_visit_counts = np.asarray([c.visits for c in node.children], dtype=np.float32)
-    child_values = np.asarray([-c.value for c in node.children], dtype=np.float32)
-    p, _ = node.get_p_v(agent)
-
-    return (child_values / (1 + child_visit_counts)) + c * (p / np.sum(p)) * (np.sqrt(node.visits) / (1 + child_visit_counts))
-
-
-def _select_child(node, agent, c):
-    child_values = _child_values(node, agent, c)
-
-    return node.children[np.argmax(child_values)]
-
-
-def _normalize_scores(scores, color, v=1):
-    normalized = [0, 0]
-    if scores[color] > scores[1 - color]:
-        normalized[color] = v
-    elif scores[color] < scores[1 - color]:
-        normalized[color] = -v
-
-    normalized[1 - color] = -normalized[color]
-    return normalized
-
-
-def _traverse(node, agent, c):
-    # print("Visits: %d, Wins: %d, Children visits: %s" % (node.visits, node.wins, ','.join(list(map(lambda c: str(c.visits), node.children)))))
+def _traverse(agent, node, c):
     node.increment_visits()
 
     if len(node.children) == 0:
-        # Terminal
         if len(node.valid_positions) == 0:
-            # Terminal node
+            # Terminal state
             scores = _normalize_scores(node.board.scores(), node.color)
-            node.add_value(scores[node.color])
+            node.update_value(scores)
             return scores
 
         # Expand
@@ -172,17 +126,32 @@ def _traverse(node, agent, c):
         node.set_children(children)
 
         # Rollout
-        # scores = _simulate(_select_child(node, agent, c), agent, root_color)
-        scores = _estimate_outcome(_select_child(node, agent, c), agent)
-        node.add_value(scores[node.color])
+        scores = _estimate_outcome(agent, _select_child(agent, node, c))
+        node.update_value(scores)
         return scores
 
-    scores = _traverse(_select_child(node, agent, c), agent, c)
-    node.add_value(scores[node.color])
+    # Continue traversal
+    scores = _traverse(agent, _select_child(agent, node, c), c)
+    node.update_value(scores)
     return scores
 
 
-def _simulate(node, agent):
+def _estimate_outcome(agent, node):
+    # Use value function to estimate game outcome
+    node.increment_visits()
+
+    _, v = node.get_p_v(agent)
+
+    scores = [0,0]
+    scores[node.color] = v
+    scores[1 - node.color] = -v
+    node.update_value(scores)
+
+    return scores
+
+
+def _simulate(agent, node):
+    # Rollout until a terminal state is reached and return true win/loss value.
     node.increment_visits()
 
     board = node.board.copy()
@@ -204,52 +173,45 @@ def _simulate(node, agent):
         curr_color = 1 - curr_color
 
     scores = _normalize_scores(board.scores(), node.color)
-    node.add_value(scores[node.color])
-
-
-def _estimate_outcome(node, agent):
-    node.increment_visits()
-
-    state, _, _ = get_state(node.board, node.color)
-    _, value = agent(tf.convert_to_tensor([state], dtype=tf.float32))
-
-    scores = [0,0]
-    scores[node.color] = value[0].numpy()
-    scores[1 - node.color] = -scores[node.color]
-
-    node.add_value(scores[node.color])
+    node.update_value(scores)
     return scores
 
 
-# def main(args):
-#     import time
-#     from agent import Agent
-#     from board import Board
-#     board = Board()
+def _normalize_scores(scores, color, v=1):
+    normalized = [0, 0]
+    if scores[color] > scores[1 - color]:
+        normalized[color] = v
+    elif scores[color] < scores[1 - color]:
+        normalized[color] = -v
 
-#     print(board)
-
-#     agent = Agent(board.size)
-#     tf.train.Checkpoint(net=agent).restore(args.checkpoint).expect_partial()
-
-#     curr_player_idx = 0
-
-#     print('Play')
-
-#     while True:
-#         valid_positions = board.valid_positions(curr_player_idx)
-#         if len(valid_positions) == 0:
-#             break
-
-#         t = time.time()
-#         _, _, action_p, _, _, _ = mcts(board, agent, curr_player_idx, n_iter=args.n_iter)
-#         print('Time: %.4f' % float(time.time() - t))
-#         raise ValueError
+    normalized[1 - color] = -normalized[color]
+    return normalized
 
 
-# if __name__ == '__main__':
-#     parser = ArgumentParser()
-#     parser.add_argument('--checkpoint', type=str, required=True)
-#     parser.add_argument('--n-iter', type=int, default=100)
+def _mcts_p(node, tau):
+    mcts_p = np.zeros(node.board.size ** 2, dtype=np.float32)
+    for i, child in enumerate(node.children):
+        mcts_p[node.valid_positions_indices[i]] = child.visits ** (1 / tau)
 
-#     main(parser.parse_args())
+    return mcts_p / np.sum(mcts_p)
+
+
+def _ucb_score(agent, node, c):
+    child_visit_counts = np.empty(len(node.children), dtype=np.float32)
+    child_values = np.empty(len(node.children), dtype=np.float32)
+    for i, child in enumerate(node.children):
+        child_visit_counts[i] = child.visits
+        child_values = -child.value # - here because the value is from opponents' perspective
+
+    # State policy
+    p, _ = node.get_p_v(agent)
+    p = p[node.valid_positions_indices]
+
+    return (child_values / (1 + child_visit_counts)) + c * (p / np.sum(p)) * (np.sqrt(node.visits) / (1 + child_visit_counts))
+
+
+def _select_child(agent, node, c):
+    ucb = _ucb_score(agent, node, c)
+
+    return node.children[np.argmax(ucb)]
+    # return node.children[np.random.choice(len(ucb), p=ucb/np.sum(ucb))]

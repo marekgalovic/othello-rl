@@ -34,11 +34,11 @@ gcloud ai-platform jobs submit training $JOB_ID \
     --master-image-uri $IMAGE_URI \
     --job-dir "${JOBS_DIR}${JOB_ID}" \
     -- \
-    --epochs 500 \
-    --epoch-games 100 \
+    --epochs 100 \
+    --epoch-games 128 \
     --mcts-iter 50 \
     --batch-size 256 \
     --lr 1e-4 \
-    --lr-decay 0.99
+    --lr-decay 0.98
 
 gcloud ai-platform jobs stream-logs $JOB_ID

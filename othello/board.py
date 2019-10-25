@@ -5,7 +5,13 @@ import numpy as np
 
 
 class Position(namedtuple('Position', ('r_i', 'c_i', 'directions', 'total_steps'))):
-    pass
+    
+    @property
+    def key(self):
+        return (self.r_i, self.c_i)
+
+    def action_index(self, board):
+        return self.r_i * board.size + self.c_i
 
 
 def _generate_directions(board_size, r_i, c_i):
