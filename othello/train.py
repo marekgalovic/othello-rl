@@ -28,34 +28,36 @@ def play_game(agent0, agent1, mcts_iter):
         steps += 1
         agent = agents[curr_agent_idx]
 
-        try:
-            valid_positions, valid_positions_ids, position_p, state, action_p, value = mcts(board, agent, curr_agent_idx, n_iter=mcts_iter)
-        except TerminalStateException:
-            break
-
-        position_idx = np.random.choice(len(position_p), p=position_p)
-        position = valid_positions[position_idx]
-
-        if curr_agent_idx == 0:
-            samples_buffer.append([state, action_p[position_idx], valid_positions_ids[position_idx], value])
-
-        board.apply_position(curr_agent_idx, position)
-
-        # state, valid_positions, valid_positions_mask = get_state(board, curr_agent_idx)
-
-        # if len(valid_positions) == 0:
+        # MCTS
+        # try:
+        #     valid_positions, valid_positions_ids, position_p, state, action_p, value = mcts(board, agent, curr_agent_idx, n_iter=mcts_iter)
+        # except TerminalStateException:
         #     break
 
-        # action_p, value = agent(tf.convert_to_tensor([state], dtype=tf.float32))
-        # action_p = action_p[0].numpy() * valid_positions_mask.reshape((-1,))
-        # value = value[0].numpy()
-        # action_idx = np.random.choice(len(action_p), p=action_p / np.sum(action_p))
+        # position_idx = np.random.choice(len(position_p), p=position_p)
+        # position = valid_positions[position_idx]
 
         # if curr_agent_idx == 0:
-        #     samples_buffer.append([state, action_p[action_idx], action_idx, value])
+        #     samples_buffer.append([state, action_p[position_idx], valid_positions_ids[position_idx], value])
 
-        # position = (int(action_idx / board.size), int(action_idx % board.size))
-        # board.apply_position(curr_agent_idx, valid_positions[position])
+        # board.apply_position(curr_agent_idx, position)
+
+        # Pure RL
+        state, valid_positions, valid_positions_mask = get_state(board, curr_agent_idx)
+
+        if len(valid_positions) == 0:
+            break
+
+        action_p, value = agent(tf.convert_to_tensor([state], dtype=tf.float32))
+        action_p = action_p[0].numpy() * valid_positions_mask.reshape((-1,))
+        value = value[0].numpy()
+        action_idx = np.random.choice(len(action_p), p=action_p / np.sum(action_p))
+
+        if curr_agent_idx == 0:
+            samples_buffer.append([state, action_p[action_idx], action_idx, value])
+
+        position = (int(action_idx / board.size), int(action_idx % board.size))
+        board.apply_position(curr_agent_idx, valid_positions[position])
 
         curr_agent_idx = 1 - curr_agent_idx
 
@@ -217,7 +219,7 @@ def main(args):
                 
                 checkpoint_manager.save()
 
-                if e > 0 and e % 5 == 0:
+                if e % 5 == 0:
                     t = time.time()
 
                     # Run benchmarks
