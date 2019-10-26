@@ -73,6 +73,13 @@ class Board:
 
         return t
 
+    def to_canonical(self, color):
+        player_positions = np.asarray(list(self._board[1::2]), dtype=np.int8)
+        occupancy = np.asarray(list(self._board[::2]), dtype=np.int8)
+
+        color_positions = (player_positions == color) * occupancy
+        return color_positions + (color_positions - 1) * occupancy
+
     def apply_position(self, color, position):
         for direction in position.directions:
             r_i = position.r_i
@@ -149,6 +156,9 @@ class Board:
             return num_steps
 
         return 0
+
+    def __hash__(self):
+        return hash(self._board.tostring())
 
     def __str__(self):
         rows, scores = [], [0, 0]

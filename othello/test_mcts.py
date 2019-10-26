@@ -4,7 +4,7 @@ import time
 import numpy as np
 import tensorflow as tf
 
-from mcts import mcts
+from mcts import MCTS
 from agent import Agent
 from board import Board
 
@@ -16,6 +16,8 @@ def main(args):
     agent = Agent(board.size)
     tf.train.Checkpoint(net=agent).restore(args.checkpoint).expect_partial()
 
+    mcts = MCTS(agent, n_iter=args.n_iter)
+
     curr_player_idx = 0
     while True:
         valid_positions = board.valid_positions(curr_player_idx)
@@ -23,7 +25,8 @@ def main(args):
             break
 
         t = time.time()
-        root, mcts_p, action_p, _ = mcts(board, agent, curr_player_idx, n_iter=args.n_iter)
+        # root, mcts_p, action_p, _ = mcts(board, agent, curr_player_idx, n_iter=args.n_iter)
+        root, mcts_p, action_p, _ = mcts.search(board, curr_player_idx)
         print('Time: %.4f' % float(time.time() - t))
         action_idx = np.random.choice(len(mcts_p), p=mcts_p)
         position_key = (int(action_idx / board.size), int(action_idx % board.size))

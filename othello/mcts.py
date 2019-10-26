@@ -93,6 +93,73 @@ class Node:
             self.increment_wins()
 
 
+class MCTS:
+
+    def __init__(self, agent, n_iter=50, c=1.):
+        self._agent = agent
+        self._n_iter = int(n_iter)
+        self._c = float(c)
+
+        self._nodes = {}
+
+    @property
+    def agent(self):
+        return self._agent
+
+    @property
+    def color(self):
+        return self._color
+    
+    def search(self, board, color, tau=1.):
+        board_key = board.to_canonical(color).tostring()
+        if board_key not in self._nodes:
+            self._nodes[board_key] = Node(board.copy(), color)
+
+        root = self._nodes[board_key]
+        if len(root.valid_positions) == 0:
+            raise TerminalStateException()
+
+        for _ in range(self._n_iter):
+            self._traverse(root)
+
+        p, v = root.get_p_v(self.agent)
+
+        return root, _mcts_p(root, tau), p, v
+
+
+    def _traverse(self, node):
+        node.increment_visits()
+
+        if len(node.children) == 0:
+            if len(node.valid_positions) == 0:
+                # Terminal state
+                scores = _normalize_scores(node.board.scores(), node.color)
+                node.update_value(scores)
+                return scores
+
+            # Expand
+            children = []
+            for position in node.valid_positions:
+                child_board = node.board.copy()
+                child_board.apply_position(node.color, position)
+                child_board_key = child_board.to_canonical(1 - node.color).tostring()
+                if child_board_key not in self._nodes:
+                    self._nodes[child_board_key] = Node(child_board, 1 - node.color)
+                children.append(self._nodes[child_board_key])
+
+            node.set_children(children)
+
+            # Rollout
+            scores = _estimate_outcome(self.agent, _select_child(self.agent, node, self._c))
+            node.update_value(scores)
+            return scores
+
+        # Continue traversal
+        scores = self._traverse(_select_child(self.agent, node, self._c))
+        node.update_value(scores)
+        return scores
+
+
 def mcts(board, agent, color, n_iter=50, c=4., tau=1.):
     root = Node(board.copy(), color)
 

@@ -1,4 +1,6 @@
 **/__pycache__/*
 experiments/*
+checkpoints/*
 
+*.DS_Store
 *.pyc

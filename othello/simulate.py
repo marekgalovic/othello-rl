@@ -1,5 +1,6 @@
 from argparse import ArgumentParser
 import random
+import time
 
 import tensorflow as tf
 
@@ -8,16 +9,10 @@ from board import Board
 from player import GreedyPlayer, GreedyTreeSearchPlayer, AlphaBetaPlayer, RLPlayer
 
 
-def main(args):
+def play_game(rl_player, opponent_player):
+    players = (rl_player, opponent_player)
+
     board = Board()
-
-    agent = Agent(board.size)
-    tf.train.Checkpoint(net=agent).restore(args.checkpoint).expect_partial()
-
-    players = [
-        RLPlayer(agent, 0),
-        AlphaBetaPlayer(1)
-    ]
     curr_player_idx = random.choice([0, 1])
 
     while True:
@@ -27,15 +22,41 @@ def main(args):
 
         position_id = players[curr_player_idx].move(board)
         board.apply_position(curr_player_idx, valid_positions[position_id])
-        print(board)
         curr_player_idx = 1 - curr_player_idx
 
-    print(board.scores())
+    return board.scores()
+
+
+def main(args):
+    board = Board()
+
+    agent = Agent(board.size)
+    tf.train.Checkpoint(net=agent).restore(args.checkpoint).expect_partial()
+
+    rl_player = RLPlayer(agent, 0)
+    opponents = [
+        GreedyPlayer(1),
+        GreedyTreeSearchPlayer(1),
+        AlphaBetaPlayer(1)
+    ]
+
+    for opponent in opponents:
+        print("%s" % opponent.__class__.__name__)
+        wins, losses = 0, 0
+        start_at = time.time()
+        for i in range(args.n_games):
+            print("\tgame: %d" % i)
+            scores = play_game(rl_player, opponent)
+            wins += int(scores[0] > scores[1])
+            losses += int(scores[1] > scores[0])
+
+        print('\twins: %d (%.2f), losses: %d (%.2f), draws: %d (%.2f), time: %.2f\n' % (wins, wins / args.n_games, losses, losses / args.n_games, args.n_games - wins - losses, 1 - (wins + losses) / args.n_games, float(time.time() - start_at)))
 
 
 if __name__ == '__main__':
     parser = ArgumentParser()
     parser.add_argument('--checkpoint', type=str, required=True)
+    parser.add_argument('--n-games', type=int, default=10)
 
     main(parser.parse_args())
 

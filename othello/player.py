@@ -3,7 +3,7 @@ import time
 import numpy as np
 import tensorflow as tf
 
-from mcts import mcts, TerminalStateException
+from mcts import MCTS, TerminalStateException
 from utils import get_state
 
 
@@ -40,16 +40,22 @@ class RLPlayer(BasePlayer):
     def __init__(self, agent, color, mcts_iter=30):
         super(RLPlayer, self).__init__(color)
         self._agent = agent
-        self._mcts_iter = int(mcts_iter)
+        self._mcts = MCTS(agent, n_iter=mcts_iter)
+        # self._mcts_iter = int(mcts_iter)
 
     @property
     def agent(self):
         return self._agent
+
+    @property
+    def mcts(self):
+        return self._mcts
     
     def move(self, board):
         # MCTS
         try:
-          root_node, mcts_p, action_p, value = mcts(board, self.agent, self.color, n_iter=self._mcts_iter)
+            root_node, mcts_p, action_p, value = self.mcts.search(board, self.color)
+            # root_node, mcts_p, action_p, value = mcts(board, self.agent, self.color, n_iter=self._mcts_iter)
         except TerminalStateException:
             return
 

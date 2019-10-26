@@ -11,7 +11,7 @@ import tensorflow as tf
 
 from board import Board
 from agent import Agent, train
-from mcts import mcts, TerminalStateException
+from mcts import MCTS, TerminalStateException
 from player import RLPlayer, GreedyPlayer, GreedyTreeSearchPlayer, AlphaBetaPlayer
 from utils import sample_checkpoint, get_state
 
@@ -20,17 +20,21 @@ def play_game(agent0, agent1, mcts_iter):
     board = Board()
 
     steps = 0
-    agents = (agent0, agent1)
+    agents = (
+        (agent0, MCTS(agent0, n_iter=mcts_iter)),
+        (agent1, MCTS(agent1, n_iter=mcts_iter))
+    )
     # states = ([], [])
     curr_agent_idx = random.choice([0, 1])
     samples_buffer = []
     while True:
         steps += 1
-        agent = agents[curr_agent_idx]
+        agent, mcts = agents[curr_agent_idx]
 
         # MCTS
         try:
-            root_node, mcts_p, action_p, value = mcts(board, agent, curr_agent_idx, n_iter=mcts_iter)
+            root_node, mcts_p, action_p, value = mcts.search(board, curr_agent_idx)
+            # root_node, mcts_p, action_p, value = mcts(board, agent, curr_agent_idx, n_iter=mcts_iter)
         except TerminalStateException:
             break
 
@@ -38,7 +42,10 @@ def play_game(agent0, agent1, mcts_iter):
         if len(valid_positions) == 0:
             break
 
-        action_idx = np.random.choice(len(mcts_p), p=mcts_p)
+        if steps <= 20:
+            action_idx = np.random.choice(len(mcts_p), p=mcts_p)
+        else:
+            action_idx = np.argmax(mcts_p)
 
         # Pure RL
         # state, valid_positions, valid_positions_mask = get_state(board, curr_agent_idx)
