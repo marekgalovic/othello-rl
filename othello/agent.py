@@ -55,7 +55,7 @@ def residual_conv2d(filters, kernel_size, activation=tf.nn.relu, name=None):
 
 class Agent(tf.keras.Model):
 
-    def __init__(self, board_size, hidden_size=32, num_residual_conv=3):
+    def __init__(self, board_size, hidden_size=128, num_residual_conv=5):
         super(Agent, self).__init__()
 
         self._convolutions = [

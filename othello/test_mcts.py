@@ -37,6 +37,6 @@ def main(args):
 if __name__ == '__main__':
     parser = ArgumentParser()
     parser.add_argument('--checkpoint', type=str, required=True)
-    parser.add_argument('--n-iter', type=int, default=100)
+    parser.add_argument('--n-iter', type=int, default=50)
 
     main(parser.parse_args())
