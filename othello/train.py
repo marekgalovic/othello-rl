@@ -155,7 +155,11 @@ def play_comparison_game(old_checkpoint, new_checkpoint, mcts_iter):
         curr_player_idx = 1 - curr_player_idx
 
     scores = board.scores()
-    return scores[1] > scores[0]
+    if scores[1] > scores[0]:
+        return 1
+    if scores[0] > scores[1]:
+        return -1
+    return 0
 
 
 def compare_agents(old_checkpoint, new_checkpoint, n_games, mcts_iter):
@@ -163,14 +167,17 @@ def compare_agents(old_checkpoint, new_checkpoint, n_games, mcts_iter):
     for _ in range(n_games):
         futures.append(play_comparison_game.remote(old_checkpoint, new_checkpoint, mcts_iter))
 
-    wins = 0
+    new_wins, old_wins = 0, 0
     while futures:
         done_ids, futures = ray.wait(futures)
         for future_id in done_ids:
-            if ray.get(future_id):
-                wins += 1
-    
-    return float(wins) / n_games
+            result = ray.get(future_id):
+            if result == 1:
+                new_wins += 1
+            if result == -1:
+                old_wins += 1
+
+    return new_wins, old_wins
 
 
 def batches(samples, batch_size):
@@ -197,6 +204,7 @@ def main(args):
 
     optimizer = tf.keras.optimizers.Adam(learning_rate=lr_schedule)
 
+    metrics_step = tf.Variable(1, dtype=tf.int64)
     checkpoint = tf.train.Checkpoint(step=tf.Variable(1, dtype=tf.int64), optimizer=optimizer, net=agent)
     checkpoint_manager = tf.train.CheckpointManager(checkpoint, os.path.join(job_dir, 'checkpoints'), max_to_keep=None)
     temp_checkpoint_manager = tf.train.CheckpointManager(checkpoint, os.path.join(job_dir, 'temp_checkpoint'), max_to_keep=1)
@@ -208,17 +216,18 @@ def main(args):
 
         with metrics_writer.as_default():
             for e in range(args.epochs):
+                # Restore the last accepted agent parameters
                 checkpoint.restore(checkpoint_manager.latest_checkpoint)
                 # Benchmark
                 if e % 5 == 0:
                     t = time.time()
                     for name, (wins, losses) in benchmark_agent(checkpoint_manager.latest_checkpoint, board.size, args.mcts_iter, n_games=args.benchmark_games).items():
-                        tf.summary.scalar('benchmark/%s/wins' % name, wins / args.benchmark_games, step=checkpoint.step)
-                        tf.summary.scalar('benchmark/%s/losses' % name, losses / args.benchmark_games, step=checkpoint.step)
-                        tf.summary.scalar('benchmark/%s/draws' % name, (args.benchmark_games - wins - losses) / args.benchmark_games, step=checkpoint.step)
+                        tf.summary.scalar('benchmark/%s/wins' % name, wins / args.benchmark_games, step=metrics_step)
+                        tf.summary.scalar('benchmark/%s/losses' % name, losses / args.benchmark_games, step=metrics_step)
+                        tf.summary.scalar('benchmark/%s/draws' % name, (args.benchmark_games - wins - losses) / args.benchmark_games, step=metrics_step)
 
                     ttrb = float(time.time() - t)
-                    tf.summary.scalar('perf/time_to_run_benchmarks', ttrb, step=checkpoint.step)
+                    tf.summary.scalar('perf/time_to_run_benchmarks', ttrb, step=metrics_step)
                     print('Time to run benchmarks: %.4f' % ttrb)
 
                 # Collect epoch samples
@@ -227,8 +236,8 @@ def main(args):
                 samples, stats = collect_samples(checkpoint_manager.checkpoints, board.size, args.epoch_games, args.mcts_iter, n_partitions=args.num_cpus)
                 ttcs = float(time.time() - t)
                 for key, val in stats.items():
-                    tf.summary.scalar('game_metrics/%s' % key, val, step=checkpoint.step)
-                tf.summary.scalar('perf/time_to_collect_samples', ttcs, step=checkpoint.step)
+                    tf.summary.scalar('game_metrics/%s' % key, val, step=metrics_step)
+                tf.summary.scalar('perf/time_to_collect_samples', ttcs, step=metrics_step)
                 print('Time to collect samples: %.4f' % ttcs)
 
                 for (states, action_probabilities, action_indices, state_values, rewards) in batches(samples, args.batch_size):
@@ -241,15 +250,16 @@ def main(args):
                         tf.convert_to_tensor(state_values, dtype=tf.float32),
                         tf.convert_to_tensor(rewards, dtype=tf.float32),
                     )
-                    tf.summary.scalar('train/loss', loss, step=checkpoint.step)
-                    tf.summary.scalar('train/mean_advantage', tf.reduce_mean(tf.convert_to_tensor(rewards, dtype=tf.float32) - tf.convert_to_tensor(state_values, dtype=tf.float32)), step=checkpoint.step)
+                    tf.summary.scalar('train/loss', loss, step=metrics_step)
+                    tf.summary.scalar('train/mean_advantage', tf.reduce_mean(tf.convert_to_tensor(rewards, dtype=tf.float32) - tf.convert_to_tensor(state_values, dtype=tf.float32)), step=metrics_step)
+                    metrics_step.assign_add(1)
                     checkpoint.step.assign_add(1)
 
                 temp_checkpoint_manager.save()
 
-                win_rate = compare_agents(checkpoint_manager.latest_checkpoint, temp_checkpoint_manager.latest_checkpoint, cpu_count(), args.mcts_iter)
-                tf.summary.scalar('train/new_agent_win_rate', win_rate, step=checkpoint.step)
-                if win_rate > args.win_rate_threshold:
+                new_wins, old_wins = compare_agents(checkpoint_manager.latest_checkpoint, temp_checkpoint_manager.latest_checkpoint, cpu_count(), args.mcts_iter)
+                tf.summary.scalar('train/new_agent_win_rate', new_wins / (new_wins + old_wins), step=metrics_step)
+                if ((new_wins + old_wins) > 0) and (new_wins / (new_wins + old_wins) >= args.win_rate_threshold):
                     # Update parameters only if the new agent beats the old one.
                     checkpoint_manager.save()
 
