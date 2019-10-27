@@ -73,6 +73,18 @@ class RLPlayer(BasePlayer):
         return (int(action_idx / board.size), int(action_idx % board.size))
 
 
+class RandomPlayer(BasePlayer):
+    '''
+        Plays a random available action.
+    '''
+
+    def move(self, board):
+        positions = list(board.valid_positions(self.color).values())
+        position = positions[np.random.randint(0, len(positions))]
+
+        return (position.r_i, position.c_i)
+
+
 class GreedyPlayer(BasePlayer):
     '''
         Greedy player always selects a position that maximizes 
