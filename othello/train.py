@@ -171,7 +171,7 @@ def compare_agents(old_checkpoint, new_checkpoint, n_games, mcts_iter):
     while futures:
         done_ids, futures = ray.wait(futures)
         for future_id in done_ids:
-            result = ray.get(future_id):
+            result = ray.get(future_id)
             if result == 1:
                 new_wins += 1
             if result == -1:
