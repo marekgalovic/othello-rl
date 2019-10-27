@@ -95,7 +95,7 @@ class Node:
 
 class MCTS:
 
-    def __init__(self, agent, n_iter=50, c=1.):
+    def __init__(self, agent, n_iter=50, c=4.):
         self._agent = agent
         self._n_iter = int(n_iter)
         self._c = float(c)
@@ -274,7 +274,7 @@ def _ucb_score(agent, node, c):
     p, _ = node.get_p_v(agent)
     p = p[node.valid_positions_indices]
 
-    return (child_values / (1 + child_visit_counts)) + c * (p / np.sum(p)) * (np.sqrt(node.visits) / (1 + child_visit_counts))
+    return (child_values / (1 + child_visit_counts)) + c * (p / np.sum(p)) * (np.sqrt(np.sum(child_visit_counts)) / (1 + child_visit_counts))
 
 
 def _select_child(agent, node, c):

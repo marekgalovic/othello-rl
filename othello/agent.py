@@ -55,7 +55,7 @@ def residual_conv2d(filters, kernel_size, activation=tf.nn.relu, name=None):
 
 class Agent(tf.keras.Model):
 
-    def __init__(self, board_size, hidden_size=128, num_residual_conv=5):
+    def __init__(self, board_size, hidden_size=256, num_residual_conv=3, dropout=0.0):
         super(Agent, self).__init__()
 
         self._convolutions = [
@@ -66,6 +66,7 @@ class Agent(tf.keras.Model):
         ]
 
         self._flatten = layers.Flatten()
+        self._dropout = layers.Dropout(dropout)
         self._value_conv = layers.Conv2D(filters=2*hidden_size, kernel_size=(3,3), activation=tf.nn.relu, name='value_conv')
         self._policy_conv = layers.Conv2D(filters=2*hidden_size, kernel_size=(3,3), activation=tf.nn.relu, name='policy_conv')
 
@@ -75,10 +76,10 @@ class Agent(tf.keras.Model):
     def call(self, state):
         conv = state
         for conv_layer in self._convolutions:
-            conv = conv_layer(conv)
+            conv = self._dropout(conv_layer(conv))
 
-        value_conv = self._flatten(self._value_conv(conv))
-        policy_conv = self._flatten(self._policy_conv(conv))
+        value_conv = self._dropout(self._flatten(self._value_conv(conv)))
+        policy_conv = self._dropout(self._flatten(self._policy_conv(conv)))
 
         value = tf.squeeze(self._value(value_conv), -1)
         policy = self._policy(policy_conv)
