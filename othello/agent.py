@@ -84,4 +84,4 @@ class Agent(tf.keras.Model):
         value = tf.squeeze(self._value(value_conv), -1)
         policy = self._policy(policy_conv)
 
-        return tf.nn.softmax(policy), value
+        return tf.nn.softmax(policy), tf.nn.tanh(value)
