@@ -198,7 +198,7 @@ def main(args):
 
     lr_schedule = tf.keras.optimizers.schedules.ExponentialDecay(
         args.lr,
-        int((args.epoch_games * 60 * 10) / args.batch_size),
+        int((args.epoch_games * 60 * args.lr_decay_epochs) / args.batch_size),
         args.lr_decay
     )
 
@@ -276,13 +276,14 @@ def main(args):
 if __name__ == '__main__':
     parser = ArgumentParser()
     parser.add_argument('--job-dir', type=str, required=True)
-    parser.add_argument('--epochs', type=int, default=20)
+    parser.add_argument('--epochs', type=int, default=100)
     parser.add_argument('--epoch-games', type=int, default=5)
     parser.add_argument('--mcts-iter', type=int, default=50)
     parser.add_argument('--benchmark-games', type=int, default=20)
     parser.add_argument('--batch-size', type=int, default=128)
     parser.add_argument('--lr', type=float, default=1e-4)
-    parser.add_argument('--lr-decay', type=float, default=0.96)
+    parser.add_argument('--lr-decay', type=float, default=1.0)
+    parser.add_argument('--lr-decay-epochs', type=int, default=30)
     parser.add_argument('--num-cpus', type=int, default=cpu_count())
     parser.add_argument('--win-rate-threshold', type=float, default=0.6)
     parser.add_argument('--contest-to-update', type=bool, default=False)

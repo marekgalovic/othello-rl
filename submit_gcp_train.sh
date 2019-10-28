@@ -37,8 +37,9 @@ gcloud ai-platform jobs submit training $JOB_ID \
     --epochs 100 \
     --epoch-games 96 \
     --mcts-iter 30 \
-    --batch-size 128 \
-    --lr 1e-3 \
-    --lr-decay 0.99
+    --batch-size 256 \
+    --lr 1e-4 \
+    --lr-decay 0.98 \
+    --lr-decay-epochs 30
 
 gcloud ai-platform jobs stream-logs $JOB_ID
