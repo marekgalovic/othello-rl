@@ -188,7 +188,7 @@ def batches(samples, batch_size):
 
 
 def main(args):
-    job_dir = os.path.join(args.job_dir, datetime.now().strftime('%Y%m%d%H%M%s'))
+    job_dir = args.job_dir if args.job_dir.startswith('gs') else os.path.join(args.job_dir, datetime.now().strftime('%Y%m%d%H%M%s'))
     if not tf.io.gfile.exists(job_dir):
         tf.io.gfile.makedirs(job_dir)
     print('Job dir: %s' % job_dir)
@@ -207,7 +207,8 @@ def main(args):
     metrics_step = tf.Variable(1, dtype=tf.int64)
     checkpoint = tf.train.Checkpoint(step=tf.Variable(1, dtype=tf.int64), optimizer=optimizer, net=agent)
     checkpoint_manager = tf.train.CheckpointManager(checkpoint, os.path.join(job_dir, 'checkpoints'), max_to_keep=None)
-    temp_checkpoint_manager = tf.train.CheckpointManager(checkpoint, os.path.join(job_dir, 'temp_checkpoint'), max_to_keep=1)
+    if args.contest_to_update:
+        temp_checkpoint_manager = tf.train.CheckpointManager(checkpoint, os.path.join(job_dir, 'temp_checkpoint'), max_to_keep=1)
     metrics_writer = tf.summary.create_file_writer(os.path.join(job_dir, 'metrics'))
 
     try:
@@ -216,8 +217,9 @@ def main(args):
 
         with metrics_writer.as_default():
             for e in range(args.epochs):
-                # Restore the last accepted agent parameters
-                checkpoint.restore(checkpoint_manager.latest_checkpoint)
+                if args.contest_to_update:
+                    # Restore the last accepted agent parameters
+                    checkpoint.restore(checkpoint_manager.latest_checkpoint)
                 # Benchmark
                 if e % 5 == 0:
                     t = time.time()
@@ -255,12 +257,16 @@ def main(args):
                     metrics_step.assign_add(1)
                     checkpoint.step.assign_add(1)
 
-                temp_checkpoint_manager.save()
-
-                new_wins, old_wins = compare_agents(checkpoint_manager.latest_checkpoint, temp_checkpoint_manager.latest_checkpoint, cpu_count(), args.mcts_iter)
-                tf.summary.scalar('train/new_agent_win_rate', new_wins / (new_wins + old_wins), step=metrics_step)
-                if ((new_wins + old_wins) > 0) and (new_wins / (new_wins + old_wins) >= args.win_rate_threshold):
+                if args.contest_to_update:
                     # Update parameters only if the new agent beats the old one.
+                    temp_checkpoint_manager.save()
+                    t = time.time()
+                    new_wins, old_wins = compare_agents(checkpoint_manager.latest_checkpoint, temp_checkpoint_manager.latest_checkpoint, cpu_count(), args.mcts_iter)
+                    tf.summary.scalar('perf/time_to_compare_agents', float(time.time() - t), step=metrics_step)
+                    tf.summary.scalar('train/new_agent_win_rate', new_wins / (new_wins + old_wins), step=metrics_step)
+                    if ((new_wins + old_wins) > 0) and (new_wins / (new_wins + old_wins) >= args.win_rate_threshold):
+                        checkpoint_manager.save()
+                else:
                     checkpoint_manager.save()
 
     finally:
@@ -274,10 +280,11 @@ if __name__ == '__main__':
     parser.add_argument('--epoch-games', type=int, default=5)
     parser.add_argument('--mcts-iter', type=int, default=50)
     parser.add_argument('--benchmark-games', type=int, default=20)
-    parser.add_argument('--win-rate-threshold', type=float, default=0.6)
     parser.add_argument('--batch-size', type=int, default=128)
     parser.add_argument('--lr', type=float, default=1e-4)
     parser.add_argument('--lr-decay', type=float, default=0.96)
     parser.add_argument('--num-cpus', type=int, default=cpu_count())
+    parser.add_argument('--win-rate-threshold', type=float, default=0.6)
+    parser.add_argument('--contest-to-update', type=bool, default=False)
 
     main(parser.parse_args())
