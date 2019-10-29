@@ -235,7 +235,7 @@ def main(args):
                 # Collect epoch samples
                 print('Epoch: %d' % e)
                 t = time.time()
-                samples, stats = collect_samples(checkpoint_manager.checkpoints, board.size, args.epoch_games, args.mcts_iter, n_partitions=args.num_cpus)
+                samples, stats = collect_samples(checkpoint_manager.checkpoints, board.size, args.epoch_games, mcts_iter=args.mcts_iter, n_partitions=args.num_cpus, gamma=args.reward_gamma)
                 ttcs = float(time.time() - t)
                 for key, val in stats.items():
                     tf.summary.scalar('game_metrics/%s' % key, val, step=metrics_step)
@@ -283,7 +283,8 @@ if __name__ == '__main__':
     parser.add_argument('--batch-size', type=int, default=128)
     parser.add_argument('--lr', type=float, default=1e-4)
     parser.add_argument('--lr-decay', type=float, default=1.0)
-    parser.add_argument('--lr-decay-epochs', type=int, default=30)
+    parser.add_argument('--lr-decay-epochs', type=int, default=5)
+    parser.add_argument('--reward-gamma', type=float, default=0.99)
     parser.add_argument('--num-cpus', type=int, default=cpu_count())
     parser.add_argument('--win-rate-threshold', type=float, default=0.6)
     parser.add_argument('--contest-to-update', type=bool, default=False)
