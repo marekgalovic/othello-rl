@@ -23,11 +23,23 @@ def ppo_loss(new_values, values, p, p_old, action_ids, rewards, eps=0.2, c=1.0):
     return tf.reduce_mean(-l_pg + c*l_v)
 
 
+def ce_loss(action_p, state_v, action_ids, rewards):
+    policy_loss = tf.nn.softmax_cross_entropy_with_logits(
+        tf.one_hot(action_ids, tf.shape(action_p)[1]),
+        action_p,
+    )
+    value_loss = tf.reduce_mean(tf.square(rewards - state_v))
+
+    return policy_loss + value_loss
+
+
 def train(agent, optimizer, states, old_action_p, action_indices, state_values, rewards):
     with tf.GradientTape() as t:
-        action_p, new_state_values = agent(states)
+        action_p, new_state_values = agent(states, raw_pi=True)
 
-        loss = ppo_loss(new_state_values, state_values, action_p, old_action_p, action_indices, rewards)
+        loss = ce_loss(action_p, new_state_values, action_indices, rewards)
+
+        # loss = ppo_loss(new_state_values, state_values, action_p, old_action_p, action_indices, rewards)
 
     grads = t.gradient(loss, agent.trainable_variables)
     optimizer.apply_gradients(zip(grads, agent.trainable_variables))
@@ -73,7 +85,7 @@ class Agent(tf.keras.Model):
         self._value = layers.Dense(1, name='value')
         self._policy = layers.Dense(board_size ** 2, name='policy')
 
-    def call(self, state):
+    def call(self, state, raw_pi=False):
         conv = state
         for conv_layer in self._convolutions:
             conv = self._dropout(conv_layer(conv))
@@ -81,7 +93,10 @@ class Agent(tf.keras.Model):
         value_conv = self._dropout(self._flatten(self._value_conv(conv)))
         policy_conv = self._dropout(self._flatten(self._policy_conv(conv)))
 
-        value = tf.squeeze(self._value(value_conv), -1)
         policy = self._policy(policy_conv)
+        value = tf.squeeze(self._value(value_conv), -1)
+
+        if raw_pi:
+            return policy, tf.nn.tanh(value)
 
         return tf.nn.softmax(policy), tf.nn.tanh(value)
