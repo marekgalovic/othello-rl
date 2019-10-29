@@ -10,7 +10,7 @@ while getopts ':l' opt; do
     esac
 done
 
-JOB_ID="othello_rl_v1_train_$(date +%Y%m%d_%H%M%S)"
+JOB_ID="othello_rl_ce_train_$(date +%Y%m%d_%H%M%S)"
 JOBS_DIR="gs://othello_rl/models/"
 
 IMAGE_NAME="gcr.io/othello-rl/github.com/marekgalovic/othello-rl"
@@ -40,6 +40,7 @@ gcloud ai-platform jobs submit training $JOB_ID \
     --batch-size 256 \
     --lr 1e-4 \
     --lr-decay 0.98 \
-    --reward-gamma 1.0
+    --reward-gamma 1.0 \
+    --contest-to-update True
 
 gcloud ai-platform jobs stream-logs $JOB_ID

@@ -24,10 +24,10 @@ def ppo_loss(new_values, values, p, p_old, action_ids, rewards, eps=0.2, c=1.0):
 
 
 def ce_loss(action_p, state_v, action_ids, rewards):
-    policy_loss = tf.nn.softmax_cross_entropy_with_logits(
+    policy_loss = tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits(
         tf.one_hot(action_ids, tf.shape(action_p)[1]),
         action_p,
-    )
+    ))
     value_loss = tf.reduce_mean(tf.square(rewards - state_v))
 
     return policy_loss + value_loss
