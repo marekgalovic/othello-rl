@@ -101,12 +101,12 @@ def play_games(agent0_checkpoint, agent1_checkpoint, board_size, n_games, mcts_i
     return samples, total_steps, total_wins, total_losses
 
 
-def collect_samples(checkpoints, board_size, n_games=1, mcts_iter=10, n_partitions=1, gamma=0.99, p_latest_checkpoint=0.9):
+def collect_samples(checkpoints, board_size, n_games=1, mcts_iter=10, n_partitions=1, gamma=0.99, checkpoint_gamma=0.5):
     partition_games = int(np.ceil(n_games / n_partitions))
 
     futures = []
     for _ in range(n_partitions):
-        futures.append(play_games.remote(checkpoints[-1], sample_checkpoint(checkpoints, p_latest=p_latest_checkpoint), board_size, partition_games, mcts_iter, gamma))
+        futures.append(play_games.remote(checkpoints[-1], sample_checkpoint(checkpoints, gamma=checkpoint_gamma), board_size, partition_games, mcts_iter, gamma))
 
     samples  = []
     total_steps, total_wins, total_losses = 0, 0, 0
@@ -242,7 +242,7 @@ def main(args):
                     mcts_iter=args.mcts_iter,
                     n_partitions=args.num_cpus,
                     gamma=args.reward_gamma,
-                    p_latest_checkpoint=args.p_latest_checkpoint
+                    checkpoint_gamma=args.checkpoint_gamma
                 )
                 ttcs = float(time.time() - t)
                 for key, val in stats.items():
@@ -294,7 +294,7 @@ if __name__ == '__main__':
     parser.add_argument('--lr-decay-epochs', type=int, default=5)
     parser.add_argument('--reward-gamma', type=float, default=0.99)
     parser.add_argument('--num-cpus', type=int, default=cpu_count())
-    parser.add_argument('--p-latest-checkpoint', type=float, default=0.9)
+    parser.add_argument('--checkpoint-gamma', type=float, default=0.5)
     parser.add_argument('--win-rate-threshold', type=float, default=0.6)
     parser.add_argument('--contest-to-update', type=bool, default=False)
 

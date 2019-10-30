@@ -66,7 +66,7 @@ def residual_conv2d(filters, kernel_size, activation=tf.nn.relu, name=None):
 
 class Agent(tf.keras.Model):
 
-    def __init__(self, board_size, hidden_size=256, num_residual_conv=3, dropout=0.0):
+    def __init__(self, board_size, hidden_size=256, num_residual_conv=5, dropout=0.0):
         super(Agent, self).__init__()
 
         self._convolutions = [
@@ -78,24 +78,31 @@ class Agent(tf.keras.Model):
 
         self._flatten = layers.Flatten()
         self._dropout = layers.Dropout(dropout)
-        self._value_conv = layers.Conv2D(filters=2*hidden_size, kernel_size=(3,3), activation=tf.nn.relu, name='value_conv')
-        self._policy_conv = layers.Conv2D(filters=2*hidden_size, kernel_size=(3,3), activation=tf.nn.relu, name='policy_conv')
 
-        self._value = layers.Dense(1, name='value')
+        self._policy_conv = layers.Conv2D(filters=2, kernel_size=(1,1), name='policy_conv')
+        self._bn_policy = layers.BatchNormalization()
+
+        self._value_conv = layers.Conv2D(filters=1, kernel_size=(1,1), name='value_conv')
+        self._bn_value = layers.BatchNormalization()
+
         self._policy = layers.Dense(board_size ** 2, name='policy')
+        self._value_hidden = layers.Dense(hidden_size, name='value')
+        self._value = layers.Dense(1, name='value')
 
     def call(self, state, raw_pi=False):
         conv = state
         for conv_layer in self._convolutions:
             conv = self._dropout(conv_layer(conv))
 
-        value_conv = self._dropout(self._flatten(self._value_conv(conv)))
-        policy_conv = self._dropout(self._flatten(self._policy_conv(conv)))
+        policy_conv = self._dropout(self._flatten(tf.nn.relu(self._bn_policy(self._policy_conv(conv)))))
+        value_conv = self._dropout(self._flatten(tf.nn.relu(self._bn_value(self._value_conv(conv)))))
 
         policy = self._policy(policy_conv)
-        value = tf.squeeze(self._value(value_conv), -1)
+        value = self._dropout(tf.nn.relu(self._value_hidden(value_conv)))
+        value = tf.nn.tanh(self._value(value))
+        value = tf.squeeze(value, -1)
 
         if raw_pi:
-            return policy, tf.nn.tanh(value)
+            return policy, value
 
-        return tf.nn.softmax(policy), tf.nn.tanh(value)
+        return tf.nn.softmax(policy), value
