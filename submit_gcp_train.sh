@@ -35,12 +35,11 @@ gcloud ai-platform jobs submit training $JOB_ID \
     --job-dir "${JOBS_DIR}${JOB_ID}" \
     -- \
     --epochs 100 \
-    --epoch-games 96 \
+    --epoch-games 160 \
     --mcts-iter 30 \
     --batch-size 256 \
     --lr 1e-4 \
     --lr-decay 0.98 \
-    --reward-gamma 1.0 \
-    --contest-to-update True
+    --reward-gamma 1.0
 
 gcloud ai-platform jobs stream-logs $JOB_ID

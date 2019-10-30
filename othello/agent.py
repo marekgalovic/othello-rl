@@ -35,11 +35,10 @@ def ce_loss(action_p, state_v, action_ids, rewards):
 
 def train(agent, optimizer, states, old_action_p, action_indices, state_values, rewards):
     with tf.GradientTape() as t:
-        action_p, new_state_values = agent(states, raw_pi=True)
+        action_p, new_state_values = agent(states)
 
-        loss = ce_loss(action_p, new_state_values, action_indices, rewards)
-
-        # loss = ppo_loss(new_state_values, state_values, action_p, old_action_p, action_indices, rewards)
+        # loss = ce_loss(action_p, new_state_values, action_indices, rewards)
+        loss = ppo_loss(new_state_values, state_values, action_p, old_action_p, action_indices, rewards)
 
     grads = t.gradient(loss, agent.trainable_variables)
     optimizer.apply_gradients(zip(grads, agent.trainable_variables))
