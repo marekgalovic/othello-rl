@@ -3,7 +3,7 @@ import time
 import numpy as np
 import tensorflow as tf
 
-from mcts import MCTS, TerminalStateException
+from mcts import MCTS, mcts, TerminalStateException
 from utils import get_state
 
 
@@ -37,11 +37,14 @@ class BasePlayer:
 
 class RLPlayer(BasePlayer):
 
-    def __init__(self, agent, color, mcts_iter=30):
+    def __init__(self, agent, color, mcts=True, mcts_iter=30, mcts_c=4.):
         super(RLPlayer, self).__init__(color)
         self._agent = agent
-        self._mcts = MCTS(agent, n_iter=mcts_iter)
-        # self._mcts_iter = int(mcts_iter)
+        self._mcts = None
+        self._mcts_iter = int(mcts_iter)
+        self._mcts_c = float(mcts_c)
+        if mcts:
+            self._mcts = MCTS(agent, n_iter=mcts_iter, c=mcts_c)
 
     @property
     def agent(self):
@@ -52,23 +55,23 @@ class RLPlayer(BasePlayer):
         return self._mcts
     
     def move(self, board):
-        # MCTS
-        # try:
-        #     root_node, mcts_p, action_p, value = self.mcts.search(board, self.color)
-        #     # root_node, mcts_p, action_p, value = mcts(board, self.agent, self.color, n_iter=self._mcts_iter)
-        # except TerminalStateException:
-        #     return
+        if self.mcts is not None:
+            try:
+                _, mcts_p, _, _ = self.mcts.search(board, self.color)
+                # _, mcts_p, _, _ = mcts(board, self.agent, self.color, n_iter=self._mcts_iter, c=1)
+            except TerminalStateException:
+                return
 
-        # action_idx = np.argmax(mcts_p)
+            action_idx = np.argmax(mcts_p)
+        else:
+            state, valid_positions, valid_positions_mask = get_state(board, self.color)
+            if len(valid_positions) == 0:
+                return
 
-        # Pure RL
-        state, valid_positions, valid_positions_mask = get_state(board, self.color)
-        if len(valid_positions) == 0:
-            return
-
-        action_p, _ = self.agent(tf.convert_to_tensor([state], dtype=tf.float32))
-        action_p = action_p[0].numpy() * valid_positions_mask.reshape((-1,))
-        action_idx = np.random.choice(len(action_p), p=action_p / np.sum(action_p))
+            action_p, _ = self.agent(tf.convert_to_tensor([state], dtype=tf.float32))
+            action_p = action_p[0].numpy() * valid_positions_mask.reshape((-1,))
+            action_idx = np.argmax(action_p)
+            # action_idx = np.random.choice(len(action_p), p=action_p / np.sum(action_p))
 
         return (int(action_idx / board.size), int(action_idx % board.size))
 

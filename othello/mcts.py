@@ -13,10 +13,10 @@ class Node:
         self._board = board
         self._color = color
 
-        self._wins = 0
         self._visits = 0
-        self._value = 0
-        self._children = {}
+        self._children = []
+        self._child_values = None
+        self._child_visits = None
 
         self._state = None
         self._valid_positions = None
@@ -32,21 +32,21 @@ class Node:
         return self._color
 
     @property
-    def wins(self):
-        return self._wins
-
-    @property
     def visits(self):
         return self._visits
-
-    @property
-    def value(self):
-        return self._value
     
     @property
     def children(self):
         return self._children
 
+    @property
+    def child_values(self):
+        return self._child_values
+
+    @property
+    def child_visits(self):
+        return self._child_visits
+    
     @property
     def state(self):
         if self._state is None:
@@ -80,17 +80,15 @@ class Node:
 
     def set_children(self, children):
         self._children = children
-
-    def increment_wins(self):
-        self._wins += 1
+        self._child_values = np.zeros(len(children), dtype=np.float32)
+        self._child_visits = np.zeros(len(children), dtype=np.int32)
 
     def increment_visits(self):
         self._visits += 1
 
-    def update_value(self, scores):
-        self._value += scores[self.color]
-        if scores[self.color] > 0:
-            self.increment_wins()
+    def update_value(self, child_idx, value):
+        self._child_visits[child_idx] += 1
+        self._child_values[child_idx] += value
 
 
 class MCTS:
@@ -133,9 +131,7 @@ class MCTS:
         if len(node.children) == 0:
             if len(node.valid_positions) == 0:
                 # Terminal state
-                scores = _normalize_scores(node.board.scores(), node.color)
-                node.update_value(scores)
-                return scores
+                return -_get_value_from_scores(node.board.scores(), node.color)
 
             # Expand
             children = []
@@ -146,18 +142,19 @@ class MCTS:
                 if child_board_key not in self._nodes:
                     self._nodes[child_board_key] = Node(child_board, 1 - node.color)
                 children.append(self._nodes[child_board_key])
-
             node.set_children(children)
 
             # Rollout
-            scores = _estimate_outcome(self.agent, _select_child(self.agent, node, self._c))
-            node.update_value(scores)
-            return scores
+            idx = np.argmax(_ucb_score(self.agent, node, self._c))
+            value = _estimate_outcome(self.agent, node.children[idx])
+            node.update_value(idx, value)
+            return -value
 
         # Continue traversal
-        scores = self._traverse(_select_child(self.agent, node, self._c))
-        node.update_value(scores)
-        return scores
+        idx = np.argmax(_ucb_score(self.agent, node, self._c))
+        value = self._traverse(node.children[idx])
+        node.update_value(idx, value)
+        return -value
 
 
 def mcts(board, agent, color, n_iter=50, c=4., tau=1.):
@@ -180,9 +177,7 @@ def _traverse(agent, node, c):
     if len(node.children) == 0:
         if len(node.valid_positions) == 0:
             # Terminal state
-            scores = _normalize_scores(node.board.scores(), node.color)
-            node.update_value(scores)
-            return scores
+            return -_get_value_from_scores(node.board.scores(), node.color)
 
         # Expand
         children = []
@@ -192,15 +187,16 @@ def _traverse(agent, node, c):
             children.append(Node(child_board, 1 - node.color))
         node.set_children(children)
 
-        # Rollout
-        scores = _estimate_outcome(agent, _select_child(agent, node, c))
-        node.update_value(scores)
-        return scores
+        idx = np.argmax(_ucb_score(agent, node, c))
+        value = _estimate_outcome(agent, node.children[idx])
+        node.update_value(idx, value)
+        return -value
 
     # Continue traversal
-    scores = _traverse(agent, _select_child(agent, node, c), c)
-    node.update_value(scores)
-    return scores
+    idx = np.argmax(_ucb_score(agent, node, c))
+    value = _traverse(agent, node.children[idx], c)
+    node.update_value(idx, value)
+    return -value
 
 
 def _estimate_outcome(agent, node):
@@ -208,13 +204,36 @@ def _estimate_outcome(agent, node):
     node.increment_visits()
 
     _, v = node.get_p_v(agent)
+    return -v
 
-    scores = [0,0]
-    scores[node.color] = v
-    scores[1 - node.color] = -v
-    node.update_value(scores)
 
-    return scores
+def _simulate_truncated(agent, node, frac_occupied=.5):
+    # Rollout until (board.size ** 2) * frac_occupied positions are occupied by players' stones
+    node.increment_visits()
+
+    board = node.board.copy()
+    curr_color = node.color
+
+    while (np.sum(board.scores()) / (board.size ** 2)) < frac_occupied:
+        state, valid_positions, valid_positions_mask = get_state(board, curr_color)
+ 
+        if len(valid_positions) == 0:
+            break
+
+        action_p, _ = agent(tf.convert_to_tensor([state], dtype=tf.float32))
+        action_p = action_p[0].numpy() * valid_positions_mask.reshape((-1,))
+        action_idx = np.argmax(action_p)
+
+        position_key = (int(action_idx / board.size), int(action_idx % board.size))
+        board.apply_position(curr_color, valid_positions[position_key])
+        curr_color = 1 - curr_color
+
+    valid_positions = board.valid_positions(node.color)
+    if len(valid_positions) == 0:
+        return -_get_value_from_scores(board.scores(), node.color)
+
+    _, v = node.get_p_v(agent)
+    return -v
 
 
 def _simulate(agent, node):
@@ -239,46 +258,27 @@ def _simulate(agent, node):
 
         curr_color = 1 - curr_color
 
-    scores = _normalize_scores(board.scores(), node.color)
-    node.update_value(scores)
-    return scores
-
-
-def _normalize_scores(scores, color, v=1):
-    normalized = [0, 0]
-    if scores[color] > scores[1 - color]:
-        normalized[color] = v
-    elif scores[color] < scores[1 - color]:
-        normalized[color] = -v
-
-    normalized[1 - color] = -normalized[color]
-    return normalized
+    return -_get_value_from_scores(board.scores(), node.color)
 
 
 def _mcts_p(node, tau):
     mcts_p = np.zeros(node.board.size ** 2, dtype=np.float32)
-    for i, child in enumerate(node.children):
-        mcts_p[node.valid_positions_indices[i]] = child.visits ** (1 / tau)
+    for i, visits in enumerate(node.child_visits):
+        mcts_p[node.valid_positions_indices[i]] = visits ** (1 / tau)
 
     return mcts_p / np.sum(mcts_p)
 
 
 def _ucb_score(agent, node, c):
-    child_visit_counts = np.empty(len(node.children), dtype=np.float32)
-    child_values = np.empty(len(node.children), dtype=np.float32)
-    for i, child in enumerate(node.children):
-        child_visit_counts[i] = child.visits
-        child_values = -child.value # - here because the value is from opponents' perspective
-
-    # State policy
     p, _ = node.get_p_v(agent)
     p = p[node.valid_positions_indices]
 
-    return (child_values / (1 + child_visit_counts)) + c * (p / np.sum(p)) * (np.sqrt(np.sum(child_visit_counts)) / (1 + child_visit_counts))
+    return (node.child_values / (node.child_visits + 1)) + c * (p / np.sum(p)) * (np.sqrt(node.visits) / (node.child_visits + 1))
 
 
-def _select_child(agent, node, c):
-    ucb = _ucb_score(agent, node, c)
-
-    return node.children[np.argmax(ucb)]
-    # return node.children[np.random.choice(len(ucb), p=ucb/np.sum(ucb))]
+def _get_value_from_scores(scores, color, v=1):
+    if scores[color] > scores[1 - color]:
+        return v
+    elif scores[color] < scores[1 - color]:
+        return -v
+    return 0

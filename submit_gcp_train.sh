@@ -10,10 +10,12 @@ while getopts ':l' opt; do
     esac
 done
 
-JOB_ID="othello_rl_v2_train_$(date +%Y%m%d_%H%M%S)"
-JOBS_DIR="gs://othello_rl/models/"
+JOB_ID="othello_rl_v3_train_$(date +%Y%m%d_%H%M%S)"
 
-IMAGE_NAME="gcr.io/othello-rl/github.com/marekgalovic/othello-rl"
+GCP_PROJECT=$(gcloud config get-value project)
+JOBS_DIR="gs://mg_rl_1/othello/models/"
+
+IMAGE_NAME="gcr.io/${GCP_PROJECT}/github.com/marekgalovic/othello-rl"
 IMAGE_LAST_TAG=$(gcloud container images list-tags $IMAGE_NAME --sort-by "~TIMESTAMP" --limit 1 | tail -n 1 | awk '{ print $2 }')
 IMAGE_URI="${IMAGE_NAME}:${IMAGE_LAST_TAG}"
 
@@ -39,7 +41,7 @@ gcloud ai-platform jobs submit training $JOB_ID \
     --mcts-iter 30 \
     --batch-size 256 \
     --lr 1e-4 \
-    --lr-decay 0.98 \
+    --lr-decay 1.0 \
     --reward-gamma 1.0
 
 gcloud ai-platform jobs stream-logs $JOB_ID

@@ -3,6 +3,7 @@ import random
 import time
 
 import tensorflow as tf
+import numpy as np
 
 from agent import Agent
 from board import Board
@@ -28,16 +29,19 @@ def play_game(rl_player, opponent_player):
 
 
 def main(args):
+    np.random.seed(19970617)
+
     board = Board()
 
     agent = Agent(board.size)
     tf.train.Checkpoint(net=agent).restore(args.checkpoint).expect_partial()
 
-    rl_player = RLPlayer(agent, 0)
+    rl_player = RLPlayer(agent, 0, mcts=False)
     opponents = [
-        GreedyPlayer(1),
-        GreedyTreeSearchPlayer(1),
-        AlphaBetaPlayer(1)
+        RLPlayer(agent, 1, mcts=True, mcts_iter=args.mcts_iter, mcts_c=4),
+        # GreedyPlayer(1),
+        # GreedyTreeSearchPlayer(1),
+        # AlphaBetaPlayer(1)
     ]
 
     for opponent in opponents:
@@ -45,8 +49,8 @@ def main(args):
         wins, losses = 0, 0
         start_at = time.time()
         for i in range(args.n_games):
-            print("\tgame: %d" % i)
             scores = play_game(rl_player, opponent)
+            print("\tgame: %d (%d, %d)" % (i, scores[0], scores[1]))
             wins += int(scores[0] > scores[1])
             losses += int(scores[1] > scores[0])
 
@@ -57,6 +61,7 @@ if __name__ == '__main__':
     parser = ArgumentParser()
     parser.add_argument('--checkpoint', type=str, required=True)
     parser.add_argument('--n-games', type=int, default=10)
+    parser.add_argument('--mcts-iter', type=int, default=30)
 
     main(parser.parse_args())
 
