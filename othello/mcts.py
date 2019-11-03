@@ -272,8 +272,12 @@ def _mcts_p(node, tau):
 def _ucb_score(agent, node, c):
     p, _ = node.get_p_v(agent)
     p = p[node.valid_positions_indices]
+    if np.isclose(np.sum(p), 0):
+        p = np.ones_like(p) / len(p)
+    else:
+        p /= np.sum(p)
 
-    return (node.child_values / (node.child_visits + 1)) + c * (p / np.sum(p)) * (np.sqrt(node.visits) / (node.child_visits + 1))
+    return (node.child_values / (node.child_visits + 1)) + c * p * (np.sqrt(node.visits) / (node.child_visits + 1))
 
 
 def _get_value_from_scores(scores, color, v=1):

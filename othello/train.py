@@ -39,14 +39,15 @@ def play_game(agent0, agent1, mcts_iter):
         except TerminalStateException:
             break
 
-        state, valid_positions = (root_node.state[0], root_node.state[1])
-        if len(valid_positions) == 0:
-            break
-
+        state, valid_positions, valid_positions_mask = root_node.state
         if steps <= 20:
             action_idx = np.random.choice(len(mcts_p), p=mcts_p)
         else:
             action_idx = np.argmax(mcts_p)
+
+        if np.isclose(action_p[action_idx], 0):
+            print("Action P close to 0. Corrected to uniform.")
+            action_p = valid_positions_mask.reshape((-1,)) / np.sum(valid_positions_mask)
         # /MCTS
 
         # No mcts
@@ -59,6 +60,9 @@ def play_game(agent0, agent1, mcts_iter):
         # action_p, value = agent(tf.convert_to_tensor([state], dtype=tf.float32))
         # action_p = action_p[0].numpy() * valid_positions_mask.reshape((-1,))
         # value = value[0].numpy()
+        # if np.isclose(np.sum(action_p), 0):
+        #     print("Action P close to 0. Corrected to uniform.")
+        #     action_p = valid_positions_mask.reshape((-1,)) / np.sum(valid_positions_mask)
         # action_idx = np.random.choice(len(action_p), p=action_p / np.sum(action_p))
         # /No mcts
 

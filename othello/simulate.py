@@ -7,7 +7,7 @@ import numpy as np
 
 from agent import Agent
 from board import Board
-from player import GreedyPlayer, GreedyTreeSearchPlayer, AlphaBetaPlayer, RLPlayer
+from player import GreedyPlayer, GreedyTreeSearchPlayer, AlphaBetaPlayer, RLPlayer, RandomPlayer
 
 
 def play_game(rl_player, opponent_player):
@@ -29,19 +29,19 @@ def play_game(rl_player, opponent_player):
 
 
 def main(args):
-    np.random.seed(19970617)
+    # np.random.seed(19970617)
 
     board = Board()
 
     agent = Agent(board.size)
     tf.train.Checkpoint(net=agent).restore(args.checkpoint).expect_partial()
 
-    rl_player = RLPlayer(agent, 0, mcts=False)
+    rl_player = RLPlayer(agent, 0, mcts=True, mcts_iter=args.mcts_iter)
     opponents = [
-        RLPlayer(agent, 1, mcts=True, mcts_iter=args.mcts_iter, mcts_c=4),
-        # GreedyPlayer(1),
-        # GreedyTreeSearchPlayer(1),
-        # AlphaBetaPlayer(1)
+        RandomPlayer(1),
+        GreedyPlayer(1),
+        GreedyTreeSearchPlayer(1),
+        AlphaBetaPlayer(1)
     ]
 
     for opponent in opponents:

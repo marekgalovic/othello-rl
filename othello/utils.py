@@ -1,16 +1,16 @@
 import numpy as np
 
 
-def sample_checkpoint(checkpoints, gamma=0.2):
+def sample_checkpoint(checkpoints, gamma=0.2, last_n=5):
     assert len(checkpoints) > 0
 
     if len(checkpoints) == 1:
         return checkpoints[0]
 
-    p = gamma ** np.flip(np.arange(len(checkpoints)))
+    p = gamma ** np.flip(np.arange(len(checkpoints[-last_n:])))
     p /= np.sum(p)
 
-    return np.random.choice(checkpoints, p=p)
+    return np.random.choice(checkpoints[-last_n:], p=p)
 
 
 def get_state(board, color):
