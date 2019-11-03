@@ -1,7 +1,7 @@
 import numpy as np
 
 
-def sample_checkpoint(checkpoints, gamma=0.2, last_n=5):
+def sample_checkpoint(checkpoints, gamma=0.2, last_n=10):
     assert len(checkpoints) > 0
 
     if len(checkpoints) == 1:

@@ -45,9 +45,6 @@ def play_game(agent0, agent1, mcts_iter):
         else:
             action_idx = np.argmax(mcts_p)
 
-        if np.isclose(action_p[action_idx], 0):
-            print("Action P close to 0. Corrected to uniform.")
-            action_p = valid_positions_mask.reshape((-1,)) / np.sum(valid_positions_mask)
         # /MCTS
 
         # No mcts
@@ -60,9 +57,6 @@ def play_game(agent0, agent1, mcts_iter):
         # action_p, value = agent(tf.convert_to_tensor([state], dtype=tf.float32))
         # action_p = action_p[0].numpy() * valid_positions_mask.reshape((-1,))
         # value = value[0].numpy()
-        # if np.isclose(np.sum(action_p), 0):
-        #     print("Action P close to 0. Corrected to uniform.")
-        #     action_p = valid_positions_mask.reshape((-1,)) / np.sum(valid_positions_mask)
         # action_idx = np.random.choice(len(action_p), p=action_p / np.sum(action_p))
         # /No mcts
 
@@ -258,6 +252,9 @@ def main(args):
                 print('Time to collect samples: %.4f' % ttcs)
 
                 for (states, action_probabilities, action_indices, state_values, rewards) in batches(samples, args.batch_size):
+                    if np.any(np.isnan(action_probabilities)):
+                        raise ValueError('NaN Action P')
+
                     loss = train(
                         agent,
                         optimizer,
