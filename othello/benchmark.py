@@ -9,12 +9,12 @@ from player import RLPlayer, RandomPlayer, GreedyPlayer
 
 
 @ray.remote
-def _play_benchmark_game(agent_checkpoint, opponent_class, board_size, mcts_iter):
-    agent = Agent(board_size)
+def _play_benchmark_game(agent_checkpoint, opponent_class, board_size, args):
+    agent = Agent(board_size, hidden_size=args.agent_net_size, num_conv=args.agent_net_conv)
     tf.train.Checkpoint(net=agent).restore(agent_checkpoint).expect_partial()
 
     players = [
-        RLPlayer(agent, 0, mcts_iter=mcts_iter),
+        RLPlayer(agent, 0, mcts_iter=args.mcts_iter),
         opponent_class(1),
     ]
 
@@ -39,7 +39,7 @@ def _play_benchmark_game(agent_checkpoint, opponent_class, board_size, mcts_iter
     return 0
 
 
-def benchmark_agent(agent_checkpoint, board_size, mcts_iter, n_games=20):
+def benchmark_agent(agent_checkpoint, board_size, args):
     ref_agents = {
         'greedy': GreedyPlayer,
         'random': RandomPlayer,
@@ -49,8 +49,8 @@ def benchmark_agent(agent_checkpoint, board_size, mcts_iter, n_games=20):
     benchmark_futures = []
     benchmark_future_names = {}
     for name, player in ref_agents.items():
-        for _ in range(n_games):
-            future_id = _play_benchmark_game.remote(agent_checkpoint, player, board_size, mcts_iter)
+        for _ in range(args.benchmark_games):
+            future_id = _play_benchmark_game.remote(agent_checkpoint, player, board_size, args)
             benchmark_futures.append(future_id)
             benchmark_future_names[future_id] = name
 

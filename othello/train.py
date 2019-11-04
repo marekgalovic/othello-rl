@@ -79,35 +79,35 @@ def play_game(agent0, agent1, mcts_iter):
 
 
 @ray.remote
-def play_games(agent0_checkpoint, agent1_checkpoint, board_size, n_games, mcts_iter, gamma):
-    agent0 = Agent(board_size)
+def play_games(agent0_checkpoint, agent1_checkpoint, board_size, n_games, args):
+    agent0 = Agent(board_size, hidden_size=args.agent_net_size, num_conv=args.agent_net_conv)
     tf.train.Checkpoint(net=agent0).restore(agent0_checkpoint).expect_partial()
-    agent1 = Agent(board_size)
+    agent1 = Agent(board_size, hidden_size=args.agent_net_size, num_conv=args.agent_net_conv)
     tf.train.Checkpoint(net=agent1).restore(agent1_checkpoint).expect_partial()
 
     samples  = []
     total_steps, total_wins, total_losses = 0, 0, 0
     for _ in range(n_games):
-        game_samples, reward, game_steps = play_game(agent0, agent1, mcts_iter)
+        game_samples, reward, game_steps = play_game(agent0, agent1, args.mcts_iter)
         total_steps += game_steps
         total_wins += max(0, reward)
         total_losses += -min(0, reward)
 
         # Append discounted reward
         for i in range(len(game_samples)):
-            game_samples[i].append(reward * (gamma ** (len(game_samples) - i)))
+            game_samples[i].append(reward * (args.reward_gamma ** (len(game_samples) - i)))
 
         samples.extend(game_samples)
 
     return samples, total_steps, total_wins, total_losses
 
 
-def collect_samples(checkpoints, board_size, n_games=1, mcts_iter=10, n_partitions=1, gamma=0.99, checkpoint_gamma=0.2):
-    partition_games = int(np.ceil(n_games / n_partitions))
+def collect_samples(checkpoints, board_size, args):
+    partition_games = int(np.ceil(args.epoch_games / args.num_cpus))
 
     futures = []
-    for _ in range(n_partitions):
-        futures.append(play_games.remote(checkpoints[-1], sample_checkpoint(checkpoints, gamma=checkpoint_gamma), board_size, partition_games, mcts_iter, gamma))
+    for _ in range(args.num_cpus):
+        futures.append(play_games.remote(checkpoints[-1], sample_checkpoint(checkpoints, gamma=args.checkpoint_gamma, last_n=args.checkpoint_last_n), board_size, partition_games, args))
 
     samples  = []
     total_steps, total_wins, total_losses = 0, 0, 0
@@ -122,7 +122,7 @@ def collect_samples(checkpoints, board_size, n_games=1, mcts_iter=10, n_partitio
             total_losses += losses
             samples.extend(game_samples)
 
-    total_games = n_partitions * partition_games
+    total_games = args.num_cpus * partition_games
 
     return samples, {
         'avg_game_length': total_steps / float(total_games),
@@ -132,17 +132,17 @@ def collect_samples(checkpoints, board_size, n_games=1, mcts_iter=10, n_partitio
 
 
 @ray.remote
-def play_comparison_game(old_checkpoint, new_checkpoint, mcts_iter):
+def play_comparison_game(old_checkpoint, new_checkpoint, args):
     board = Board()
 
-    old_agent = Agent(board.size)
+    old_agent = Agent(board.size, hidden_size=args.agent_net_size, num_conv=args.agent_net_conv)
     tf.train.Checkpoint(net=old_agent).restore(old_checkpoint).expect_partial()
-    new_agent = Agent(board.size)
+    new_agent = Agent(board.size, hidden_size=args.agent_net_size, num_conv=args.agent_net_conv)
     tf.train.Checkpoint(net=new_agent).restore(new_checkpoint).expect_partial()
 
     players = (
-        RLPlayer(old_agent, 0, mcts=True, mcts_iter=mcts_iter),
-        RLPlayer(new_agent, 1, mcts=True, mcts_iter=mcts_iter)
+        RLPlayer(old_agent, 0, mcts=True, mcts_iter=args.mcts_iter),
+        RLPlayer(new_agent, 1, mcts=True, mcts_iter=args.mcts_iter)
     )
 
     curr_player_idx = random.choice([0, 1])
@@ -163,10 +163,10 @@ def play_comparison_game(old_checkpoint, new_checkpoint, mcts_iter):
     return 0
 
 
-def compare_agents(old_checkpoint, new_checkpoint, n_games, mcts_iter):
+def compare_agents(old_checkpoint, new_checkpoint, args):
     futures = []
-    for _ in range(n_games):
-        futures.append(play_comparison_game.remote(old_checkpoint, new_checkpoint, mcts_iter))
+    for _ in range(args.num_cpus):
+        futures.append(play_comparison_game.remote(old_checkpoint, new_checkpoint, args))
 
     new_wins, old_wins = 0, 0
     while futures:
@@ -189,13 +189,18 @@ def batches(samples, batch_size):
 
 
 def main(args):
+    if args.seed is not None:
+        print("Setting random seed: %d" % args.seed)
+        np.random.seed(args.seed)
+        tf.random.set_seed(args.seed)
+
     job_dir = args.job_dir if args.job_dir.startswith('gs') else os.path.join(args.job_dir, datetime.now().strftime('%Y%m%d%H%M%s'))
     if not tf.io.gfile.exists(job_dir):
         tf.io.gfile.makedirs(job_dir)
     print('Job dir: %s' % job_dir)
 
     board = Board()
-    agent = Agent(board.size)
+    agent = Agent(board.size, hidden_size=args.agent_net_size, num_conv=args.agent_net_conv)
 
     lr_schedule = tf.keras.optimizers.schedules.ExponentialDecay(
         args.lr,
@@ -224,7 +229,7 @@ def main(args):
                 # Benchmark
                 if e % 5 == 0:
                     t = time.time()
-                    for name, (wins, losses) in benchmark_agent(checkpoint_manager.latest_checkpoint, board.size, args.mcts_iter, n_games=args.benchmark_games).items():
+                    for name, (wins, losses) in benchmark_agent(checkpoint_manager.latest_checkpoint, board.size, args).items():
                         tf.summary.scalar('benchmark/%s/wins' % name, wins / args.benchmark_games, step=metrics_step)
                         tf.summary.scalar('benchmark/%s/losses' % name, losses / args.benchmark_games, step=metrics_step)
                         tf.summary.scalar('benchmark/%s/draws' % name, (args.benchmark_games - wins - losses) / args.benchmark_games, step=metrics_step)
@@ -236,15 +241,7 @@ def main(args):
                 # Collect epoch samples
                 print('Epoch: %d' % e)
                 t = time.time()
-                samples, stats = collect_samples(
-                    checkpoint_manager.checkpoints,
-                    board.size,
-                    args.epoch_games,
-                    mcts_iter=args.mcts_iter,
-                    n_partitions=args.num_cpus,
-                    gamma=args.reward_gamma,
-                    checkpoint_gamma=args.checkpoint_gamma
-                )
+                samples, stats = collect_samples(checkpoint_manager.checkpoints, board.size, args)
                 ttcs = float(time.time() - t)
                 for key, val in stats.items():
                     tf.summary.scalar('game_metrics/%s' % key, val, step=metrics_step)
@@ -273,7 +270,7 @@ def main(args):
                     # Update parameters only if the new agent beats the old one.
                     temp_checkpoint_manager.save()
                     t = time.time()
-                    new_wins, old_wins = compare_agents(checkpoint_manager.latest_checkpoint, temp_checkpoint_manager.latest_checkpoint, cpu_count(), args.mcts_iter)
+                    new_wins, old_wins = compare_agents(checkpoint_manager.latest_checkpoint, temp_checkpoint_manager.latest_checkpoint, args)
                     tf.summary.scalar('perf/time_to_compare_agents', float(time.time() - t), step=metrics_step)
                     tf.summary.scalar('train/new_agent_win_rate', new_wins / (new_wins + old_wins), step=metrics_step)
                     if ((new_wins + old_wins) > 0) and (new_wins / (new_wins + old_wins) >= args.win_rate_threshold):
@@ -288,9 +285,12 @@ def main(args):
 if __name__ == '__main__':
     parser = ArgumentParser()
     parser.add_argument('--job-dir', type=str, required=True)
+    parser.add_argument('--agent-net-size', type=int, default=256)
+    parser.add_argument('--agent-net-conv', type=int, default=5)
+    # parser.add_argument('--agent-net-dropout', type=float, default=0.2)
+    parser.add_argument('--mcts-iter', type=int, default=50)
     parser.add_argument('--epochs', type=int, default=100)
     parser.add_argument('--epoch-games', type=int, default=5)
-    parser.add_argument('--mcts-iter', type=int, default=50)
     parser.add_argument('--benchmark-games', type=int, default=20)
     parser.add_argument('--batch-size', type=int, default=128)
     parser.add_argument('--lr', type=float, default=1e-4)
@@ -299,7 +299,9 @@ if __name__ == '__main__':
     parser.add_argument('--reward-gamma', type=float, default=0.99)
     parser.add_argument('--num-cpus', type=int, default=cpu_count())
     parser.add_argument('--checkpoint-gamma', type=float, default=0.2)
+    parser.add_argument('--checkpoint-last-n', type=int, default=None)
     parser.add_argument('--contest-to-update', type=bool, default=False)
     parser.add_argument('--win-rate-threshold', type=float, default=0.6)
+    parser.add_argument('--seed', type=int, default=None)
 
     main(parser.parse_args())
