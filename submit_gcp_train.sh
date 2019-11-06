@@ -1,16 +1,20 @@
 #!/bin/bash
 
 USE_LAST=0
+STREAM_LOGS=0
 
-while getopts ':l' opt; do
+while getopts ':ls' opt; do
     case $opt in
         l)
             USE_LAST=1
         ;;
+        s)
+            STREAM_LOGS=1
+        ;;
     esac
 done
 
-JOB_ID="othello_rl_v3_train_$(date +%Y%m%d_%H%M%S)"
+JOB_ID="othello_rl_v3_gs_$(date +%Y%m%d_%H%M%S)"
 
 GCP_PROJECT=$(gcloud config get-value project)
 JOBS_DIR="gs://mg_rl_1/othello/models/"
@@ -44,8 +48,10 @@ gcloud ai-platform jobs submit training $JOB_ID \
     --lr-decay 1.0 \
     --reward-gamma 1.0 \
     --checkpoint-gamma 0.2 \
-    --agent-net-size 256 \
-    --agent-net-conv 5 \
+    --agent-net-size 512 \
+    --agent-net-conv 8 \
     --mcts-iter 30
 
-gcloud ai-platform jobs stream-logs $JOB_ID
+if [[ $STREAM_LOGS -eq 1 ]]; then
+    gcloud ai-platform jobs stream-logs $JOB_ID
+fi

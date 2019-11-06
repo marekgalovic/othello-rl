@@ -2,6 +2,7 @@ import random
 
 import ray
 import tensorflow as tf
+from collections import OrderedDict
 
 from board import Board
 from agent import Agent
@@ -10,6 +11,10 @@ from player import RLPlayer, RandomPlayer, GreedyPlayer
 
 @ray.remote
 def _play_benchmark_game(agent_checkpoint, opponent_class, board_size, args):
+    if isinstance(args, OrderedDict):
+        from dotmap import DotMap
+        args = DotMap(dict(args))
+
     agent = Agent(board_size, hidden_size=args.agent_net_size, num_conv=args.agent_net_conv)
     tf.train.Checkpoint(net=agent).restore(agent_checkpoint).expect_partial()
 
@@ -27,6 +32,8 @@ def _play_benchmark_game(agent_checkpoint, opponent_class, board_size, args):
             break
 
         position_id = players[curr_player_idx].move(board)
+        if position_id is None:
+            break
         board.apply_position(curr_player_idx, valid_positions[position_id])
         curr_player_idx = 1 - curr_player_idx
 
@@ -39,8 +46,8 @@ def _play_benchmark_game(agent_checkpoint, opponent_class, board_size, args):
     return 0
 
 
-def benchmark_agent(agent_checkpoint, board_size, args):
-    ref_agents = {
+def benchmark_agent(agent_checkpoint, board_size, args, ref_agents=None):
+    ref_agents = ref_agents or {
         'greedy': GreedyPlayer,
         'random': RandomPlayer,
     }
