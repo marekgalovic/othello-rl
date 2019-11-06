@@ -40,17 +40,17 @@ gcloud ai-platform jobs submit training $JOB_ID \
     --master-image-uri $IMAGE_URI \
     --job-dir "${JOBS_DIR}${JOB_ID}" \
     -- \
-    --seed 19970617 \
-    --epochs 100 \
-    --epoch-games 96 \
+    --epochs 50 \
+    --epoch-games 160 \
+    --benchmark-games 10 \
     --batch-size 256 \
     --lr 1e-4 \
     --lr-decay 1.0 \
     --reward-gamma 1.0 \
     --checkpoint-gamma 0.2 \
-    --agent-net-size 512 \
-    --agent-net-conv 8 \
-    --mcts-iter 30
+    --agent-net-size 256 \
+    --agent-net-conv 5 \
+    --mcts-iter 50
 
 if [[ $STREAM_LOGS -eq 1 ]]; then
     gcloud ai-platform jobs stream-logs $JOB_ID

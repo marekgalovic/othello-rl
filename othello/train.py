@@ -291,7 +291,7 @@ if __name__ == '__main__':
     parser.add_argument('--mcts-iter', type=int, default=50)
     parser.add_argument('--epochs', type=int, default=100)
     parser.add_argument('--epoch-games', type=int, default=5)
-    parser.add_argument('--benchmark-games', type=int, default=20)
+    parser.add_argument('--benchmark-games', type=int, default=10)
     parser.add_argument('--batch-size', type=int, default=128)
     parser.add_argument('--lr', type=float, default=1e-4)
     parser.add_argument('--lr-decay', type=float, default=1.0)

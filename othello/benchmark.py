@@ -6,7 +6,7 @@ from collections import OrderedDict
 
 from board import Board
 from agent import Agent
-from player import RLPlayer, RandomPlayer, GreedyPlayer
+from player import RLPlayer, RandomPlayer, GreedyPlayer, AlphaBetaPlayer, GreedyTreeSearchPlayer
 
 
 @ray.remote
@@ -48,8 +48,10 @@ def _play_benchmark_game(agent_checkpoint, opponent_class, board_size, args):
 
 def benchmark_agent(agent_checkpoint, board_size, args, ref_agents=None):
     ref_agents = ref_agents or {
-        'greedy': GreedyPlayer,
         'random': RandomPlayer,
+        'greedy': GreedyPlayer,
+        'greedy_tree_search': GreedyTreeSearchPlayer,
+        'alpha_beta': AlphaBetaPlayer,
     }
 
     # Run benchmarks
