@@ -44,7 +44,6 @@ def main(args):
             print('Checkpoint: %s' % checkpoint_path)
             for opponent_name, r in benchmark_agent(checkpoint_path, 8, args, ref_agents=ref_agents).items():
                 result[opponent_name][i] = (r[0] / args.benchmark_games)
-            break
 
         write_result(result, args.job_dir)
 
