@@ -1,9 +1,7 @@
 import os
-from argparse import ArgumentParser
-from datetime import datetime
 import time
 import random
-from multiprocessing import cpu_count
+from datetime import datetime
 
 import ray
 import numpy as np
@@ -16,6 +14,7 @@ from player import RLPlayer
 from benchmark import benchmark_agent
 from utils import sample_checkpoint, get_state
 
+from eval_checkpoints import main as eval_main
 
 def play_game(agent0, agent1, mcts_iter):
     board = Board()
@@ -280,28 +279,3 @@ def main(args):
 
     finally:
         ray.shutdown()
-
-
-if __name__ == '__main__':
-    parser = ArgumentParser()
-    parser.add_argument('--job-dir', type=str, required=True)
-    parser.add_argument('--agent-net-size', type=int, default=256)
-    parser.add_argument('--agent-net-conv', type=int, default=5)
-    # parser.add_argument('--agent-net-dropout', type=float, default=0.2)
-    parser.add_argument('--mcts-iter', type=int, default=50)
-    parser.add_argument('--epochs', type=int, default=100)
-    parser.add_argument('--epoch-games', type=int, default=5)
-    parser.add_argument('--benchmark-games', type=int, default=10)
-    parser.add_argument('--batch-size', type=int, default=128)
-    parser.add_argument('--lr', type=float, default=1e-4)
-    parser.add_argument('--lr-decay', type=float, default=1.0)
-    parser.add_argument('--lr-decay-epochs', type=int, default=5)
-    parser.add_argument('--reward-gamma', type=float, default=0.99)
-    parser.add_argument('--num-cpus', type=int, default=cpu_count())
-    parser.add_argument('--checkpoint-gamma', type=float, default=0.2)
-    parser.add_argument('--checkpoint-last-n', type=int, default=None)
-    parser.add_argument('--contest-to-update', type=bool, default=False)
-    parser.add_argument('--win-rate-threshold', type=float, default=0.6)
-    parser.add_argument('--seed', type=int, default=None)
-
-    main(parser.parse_args())

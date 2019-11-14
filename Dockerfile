@@ -34,4 +34,4 @@ RUN pip install ray
 RUN mkdir /othello
 ADD ./othello /othello
 
-ENTRYPOINT ["python", "/othello/train.py"]
+ENTRYPOINT ["python", "/othello/main.py"]
