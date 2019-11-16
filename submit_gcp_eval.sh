@@ -32,7 +32,7 @@ fi
 echo "JOB_ID: ${JOB_ID}"
 echo "IMAGE_URI: ${IMAGE_URI}"
 
-gcloud ai-platform jobs submit training "${JOB_ID}_eval" \
+gcloud ai-platform jobs submit training "${JOB_ID}_eval_$(date +%Y%m%d_%H%M%S)" \
     --config gcp_train_config.yaml \
     --region us-central1 \
     --master-image-uri $IMAGE_URI \
